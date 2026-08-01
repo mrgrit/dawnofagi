@@ -25,12 +25,12 @@ hooks:  ## git 훅 재설치 (gitleaks 포함)
 # ══ 품질 ════════════════════════════════════════════════════════════════
 .PHONY: lint
 lint:  ## ruff lint
-	@$(PY) -m ruff check packages infra scripts
+	@$(PY) -m ruff check packages infra scripts eg agents
 
 .PHONY: fmt
 fmt:  ## ruff format (수정)
-	@$(PY) -m ruff format packages infra
-	@$(PY) -m ruff check --fix packages infra scripts
+	@$(PY) -m ruff format packages infra eg agents scripts
+	@$(PY) -m ruff check --fix packages infra scripts eg agents
 
 .PHONY: test
 test:  ## pytest

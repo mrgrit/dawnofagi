@@ -5,11 +5,10 @@
 """
 
 import os
-import sys
 
 os.environ.setdefault("DAWN_AUTO_APPROVE", "1")
 
-from dawn_agents import Worker  # noqa: E402
+from dawn_agents import Worker
 
 DEMOS = [
     (
