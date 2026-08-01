@@ -107,7 +107,7 @@
 | **L4 개인** | `org/agents/<에이전트>/SOUL.md` | 그 에이전트 하나 | 팀 리드 |
 | **게이트** | `org/**/gate.yaml` | 해당 범위의 도구 allow/deny | 보안(CCC) |
 
-상세: [`docs/governance/CONTROL_PLANE.md`](docs/governance/CONTROL_PLANE.md) · 관제 운영: [`docs/governance/AOC_OPERATIONS.md`](docs/governance/AOC_OPERATIONS.md)
+상세: [`docs/governance/CONTROL_PLANE.md`](docs/governance/CONTROL_PLANE.md) · 관제 운영: [`docs/governance/AOC_OPERATIONS.md`](docs/governance/AOC_OPERATIONS.md) · 그룹웨어: [`docs/governance/PORTAL_GUIDE.md`](docs/governance/PORTAL_GUIDE.md)
 검증: `make control-lint` (Control Readiness Score)
 
 ---

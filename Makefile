@@ -9,8 +9,11 @@ help:  ## 이 목록
 	@echo ""
 	@echo "  the dawn of AGI — 명령"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN {FS = ":.*?## "}; {printf "    \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@awk -F'##' '/^[a-zA-Z0-9_.-]+:.*##/ { \
+	    split($$1, t, ":"); \
+	    printf "    \033[36m%-20s\033[0m%s\n", t[1], $$2 } \
+	  /^# ══/ { gsub(/^# ══ | ═+$$/, "", $$0); printf "\n  \033[1m%s\033[0m\n", $$0 }' \
+	  $(MAKEFILE_LIST)
 	@echo ""
 
 # ══ 환경 ════════════════════════════════════════════════════════════════
@@ -25,16 +28,16 @@ hooks:  ## git 훅 재설치 (gitleaks 포함)
 # ══ 품질 ════════════════════════════════════════════════════════════════
 .PHONY: lint
 lint:  ## ruff lint
-	@$(PY) -m ruff check packages infra scripts eg agents aoc
+	@$(PY) -m ruff check packages infra scripts eg agents aoc apps/groupware
 
 .PHONY: fmt
 fmt:  ## ruff format (수정)
-	@$(PY) -m ruff format packages infra eg agents scripts aoc
-	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc
+	@$(PY) -m ruff format packages infra eg agents scripts aoc apps/groupware
+	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc apps/groupware
 
 .PHONY: test
 test:  ## pytest
-	@$(PY) -m pytest packages agents aoc -q
+	@$(PY) -m pytest packages agents aoc apps/groupware -q
 
 # ══ 레지스트리 · 통제 평면 ══════════════════════════════════════════════
 .PHONY: registry
@@ -218,16 +221,69 @@ office-stop:  ## 픽셀 오피스 중지
 	   && echo "중지됨" || echo "떠 있지 않다"
 	@rm -f var/aoc/serve.pid
 
+# ══ 웹 (P4 — 홈페이지·그룹웨어) ══════════════════════════════════════════
+.PHONY: site
+site:  ## 공개 홈페이지 — http://<호스트 IP>:8810 (L0, dmz 앞단)
+	@$(PY) -m dawn_groupware.cli site --port $${PORT:-8810} --host $${HOST:-0.0.0.0}
+
+.PHONY: portal
+portal:  ## 사내 그룹웨어 — http://<호스트 IP>:8811 (승인 큐·EG 조정·관제)
+	@$(PY) -m dawn_groupware.cli portal --port $${PORT:-8811} --host $${HOST:-0.0.0.0} \
+	  --office-url "$${OFFICE_URL:-http://localhost:8800/}"
+
+.PHONY: web-bg
+web-bg:  ## 홈페이지 + 그룹웨어 백그라운드 기동 (SSH 끊겨도 산다)
+	@mkdir -p var/web
+	@pgrep -f "[d]awn_groupware.cli site" >/dev/null \
+	  || (setsid nohup $(PY) -m dawn_groupware.cli site --port $${SITE_PORT:-8810} \
+	        --host 0.0.0.0 > var/web/site.log 2>&1 < /dev/null &)
+	@pgrep -f "[d]awn_groupware.cli portal" >/dev/null \
+	  || (setsid nohup $(PY) -m dawn_groupware.cli portal --port $${PORTAL_PORT:-8811} \
+	        --host 0.0.0.0 --office-url "$${OFFICE_URL:-http://localhost:8800/}" \
+	        > var/web/portal.log 2>&1 < /dev/null &)
+	@sleep 3; cat var/web/site.log var/web/portal.log
+	@echo "  중지: make web-stop"
+
+.PHONY: web-stop
+web-stop:  ## 홈페이지·그룹웨어 중지
+	@pgrep -f "[d]awn_groupware.cli" | xargs -r kill 2>/dev/null \
+	   && echo "중지됨" || echo "떠 있지 않다"
+
+.PHONY: portal-bootstrap
+portal-bootstrap:  ## 그룹웨어 첫 관리자 계정 (비밀번호 1회 출력)
+	@$(PY) -m dawn_groupware.cli bootstrap $${U:-admin} --org $${ORG:-org:dawn}
+
+.PHONY: portal-users
+portal-users:  ## 그룹웨어 계정 목록
+	@$(PY) -m dawn_groupware.cli users
+
+.PHONY: portal-resetpw
+portal-resetpw:  ## 그룹웨어 비밀번호 재발급 (1회 출력) — make portal-resetpw U=admin
+	@$(PY) -m dawn_groupware.cli resetpw $(U)
+
+.PHONY: portal-caps
+portal-caps:  ## 능력 카탈로그 (권한 이름)
+	@$(PY) -m dawn_groupware.cli caps
+
+.PHONY: portal-audit
+portal-audit:  ## 그룹웨어 감사 로그 — make portal-audit A=hitl.
+	@$(PY) -m dawn_groupware.cli audit --limit $${N:-40} --action "$(A)"
+
+.PHONY: inquiries
+inquiries:  ## 홈페이지 문의 접수함
+	@$(PY) -m dawn_groupware.cli inquiries
+
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
 check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0~P3 자기검증 (DoD + 개입·게이트·관제 실증). --live 는 각 스크립트로
+verify:  ## P0~P4 자기검증 (DoD + 개입·게이트·관제·그룹웨어 실증)
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
 	@bash scripts/verify-p2.sh
 	@bash scripts/verify-p3.sh
+	@bash scripts/verify-p4.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔

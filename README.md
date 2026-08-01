@@ -147,7 +147,9 @@ agents/                       에이전트 하네스 · 워커 런타임
 aoc/                          관제 시스템 — AOC 5계층                   (P3)
   dawn_aoc/                     수집 · 탐지 · 트리아지 · 대응 · 킬스위치 · KPI · 콘솔
 apps/pixel-office/index.html  픽셀 오피스 관제 콘솔 (파일 1개, 의존성 0)  (P3)
-apps/                         홈페이지 · 그룹웨어                       (P4/P5)
+apps/groupware/               공개 홈페이지 + 사내 그룹웨어              (P4)
+  dawn_groupware/               인증·조직권한 · 승인 관문 · EG 조정 UI · 감사
+apps/website/                 공개 홈페이지 정적 자산                    (P4)
 infra/                        배포 · el34 연동
 docs/
   START_HERE.md                 구축 순서 P0→P6
@@ -155,6 +157,7 @@ docs/
   instructions/                 구축 지시문 P0~P6
   governance/CONTROL_PLANE.md   통제 평면 사용법 (미리 막는 법)
   governance/AOC_OPERATIONS.md  관제 콘솔 운영 (벌어진 뒤 잡는 법)
+  governance/PORTAL_GUIDE.md    그룹웨어 — 사람이 개입하는 통로
 BUILD_LOG.md                  진행 기록      QUESTIONS.md  사람에게 묻는 큐
 ```
 
@@ -187,7 +190,7 @@ make health                # 도달성 + 인증 확인
 | **P1** | Experience Graph — 회사의 뇌 (노드 74 · 엣지 136) | ✅ 완료 |
 | **P2** | 에이전트 하네스·루프·행동 게이트 | ✅ 완료 |
 | **P3** | AOC 관제 시스템 · 픽셀 오피스 | ✅ 완료 |
-| P4 | 홈페이지 · 그룹웨어 | ⬜ |
+| **P4** | 홈페이지 · 그룹웨어 | ✅ 완료 |
 | P5 | 업무 시스템 (CRM·문서·프로젝트·경리) | ⬜ |
 | P6 | 통합 · 레드팀 검증 · 자사 운영 개시 | ⬜ |
 
@@ -200,7 +203,7 @@ make health                # 도달성 + 인증 확인
 ```bash
 make help            # 전체 목록
 make check           # lint · test · registry · compile · control-lint · eg-validate · eg-bridge
-make verify          # P0~P3 자기검증 (DoD + 개입·게이트·관제 실증)
+make verify          # P0~P4 자기검증 (DoD + 개입·게이트·관제·그룹웨어 실증)
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
 
@@ -219,7 +222,22 @@ make aoc-respond ID=<case-id>           # 대응 플레이북 집행 (비가역�
 make aoc-control                        # 킬 스위치 — 에이전트가 못 건드리는 계층
 make aoc-kpi                            # KPI + 자율화 등급 검토
 make aoc-replay T=<trace-id>            # 타임라인 리플레이 (사후 재구성)
+
+make web-bg                             # 홈페이지(:8810) + 그룹웨어(:8811) 백그라운드
+make portal-bootstrap                   # 그룹웨어 첫 관리자 (비밀번호 1회 출력)
+make portal-users                       # 계정 목록
+make portal-caps                        # 능력(권한) 카탈로그
+make portal-audit A=hitl.               # 감사 로그
+make inquiries                          # 홈페이지 문의 접수함
 ```
+
+### 접속
+
+| 앱 | 주소 | 존 | 인증 |
+|---|---|---|---|
+| 공개 홈페이지 | `http://<호스트>:8810` | dmz 앞단 (L0) | 없음 |
+| 사내 그룹웨어 | `http://<호스트>:8811` | user/int | 필요 |
+| 픽셀 오피스 | `http://<호스트>:8800` | 사내 | 없음 (그룹웨어에서 링크) |
 
 ---
 

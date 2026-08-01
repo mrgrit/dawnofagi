@@ -1,9 +1,11 @@
 {
   "_comment": "전사 EG 시드 #3 — 페르소나. 조직의 일하는 방식·말투·행동원칙. **핵심 개입 지점**: 사람이 principles/prohibited 를 고치면 다음 작업부터 해당 조직 에이전트 행동이 바뀐다(코드 변경 0).",
-  "_meta": {"created_by": "founder", "seed": "03_personas"},
+  "_meta": {
+    "created_by": "founder",
+    "seed": "03_personas"
+  },
   "_reconstruction_note": "원본 03_personas.json 이 전달 파일에 없어, EG_SCHEMA_DESIGN.md §4(페르소나 6종)·03_org_personas.md(적용 조직·핵심 원칙)·02_policies.json 을 근거로 재구성했다. 노드 6 · 엣지 22(HAS_PERSONA 12 + GOVERNED_BY 10)로 설계서의 총계(노드 74·엣지 136)와 일치한다. 원본 도착 시 이 파일만 교체하면 된다.",
   "_control_plane_link": "각 페르소나는 통제 평면 L4(org/agents/<id>/SOUL.md)의 EG 측 대응물이다. SOUL.md 가 '이 에이전트 1명'이라면 Persona 는 '이 조직의 모든 에이전트'다. 둘이 어긋나면 make eg-bridge 가 잡는다.",
-
   "Persona": [
     {
       "id": "persona:company-default",
@@ -29,7 +31,6 @@
       ],
       "escalation_rule": "스펙이 모호하거나 보안 판단이 필요하거나 처음 보는 유형이면 추측하지 말고 인간에게 확인한다."
     },
-
     {
       "id": "persona:aoc-dev",
       "role": "AOC 개발·연구 에이전트",
@@ -53,7 +54,6 @@
       ],
       "escalation_rule": "설계 결정·비가역 영향(스키마 변경·마이그레이션·외부 API 계약)·스펙 모호 시 연구소(org:aoc-lab)를 거쳐 인간에게. QUESTIONS.md 에 남긴다."
     },
-
     {
       "id": "persona:secops",
       "role": "보안운영·관제 에이전트",
@@ -77,7 +77,6 @@
       ],
       "escalation_rule": "비가역 액션·심각도 최고·신규 공격 유형·크로스테넌트 영향·규제 보고 대상이면 인간 게이트. human-on-the-loop — 매 건이 아니라 이 조건에만."
     },
-
     {
       "id": "persona:offensive",
       "role": "오펜시브(레드팀) 에이전트",
@@ -98,7 +97,6 @@
       ],
       "escalation_rule": "스코프 경계가 모호하거나 실 자산에 영향이 갈 수 있으면 즉시 중단하고 인간 승인. pol:no-malicious-security 위반 소지는 예외 없이 중단."
     },
-
     {
       "id": "persona:consulting",
       "role": "AX 컨설팅 에이전트",
@@ -118,7 +116,6 @@
       ],
       "escalation_rule": "계약·금액·법적 약속·고객 데이터 반출이 걸리면 사람에게. 근거를 찾지 못한 주장은 산출물에서 빼거나 '미확인'으로 표시한다."
     },
-
     {
       "id": "persona:corporate",
       "role": "경영관리 에이전트",
@@ -144,41 +141,117 @@
       "escalation_rule": "금액 임계 초과·L3 개인정보 포함·전례 없는 유형·3자 대조 불일치·중복 지급 의심·예산 초과 중 하나라도 해당하면 승인 큐로. 판단 근거와 불확실한 점을 함께 올린다."
     }
   ],
-
   "_edge_rule": "HAS_PERSONA 는 03_org_personas.md 의 '적용 조직' 매핑을 그대로 따른다(전사/AOC개발·연구소/CCC·데이터센터/CCC오펜시브/AX 3사업부/경영관리). GOVERNED_BY 는 **그 페르소나의 존재 이유와 직결된 정책**만 연결한다 — 보안등급 기반으로 전 자산에 자동 적용되는 정책(APPLIES_TO→SecurityLevel)을 중복으로 매달지 않는다. 페르소나에 안 걸린 정책이 그 조직에 적용되지 않는다는 뜻이 아니다(등급 경로로 여전히 걸린다).",
-
   "edges": [
-    {"type": "HAS_PERSONA", "from": "org:dawn", "to": "persona:company-default"},
-
-    {"type": "HAS_PERSONA", "from": "org:aoc-dev", "to": "persona:aoc-dev"},
-    {"type": "HAS_PERSONA", "from": "org:aoc-lab", "to": "persona:aoc-dev"},
-
-    {"type": "HAS_PERSONA", "from": "org:ccc", "to": "persona:secops"},
-    {"type": "HAS_PERSONA", "from": "org:ccc", "to": "persona:offensive"},
-    {"type": "HAS_PERSONA", "from": "org:it-dc", "to": "persona:secops"},
-
-    {"type": "HAS_PERSONA", "from": "org:ax-univ", "to": "persona:consulting"},
-    {"type": "HAS_PERSONA", "from": "org:ax-sec", "to": "persona:consulting"},
-    {"type": "HAS_PERSONA", "from": "org:ax-mkt", "to": "persona:consulting"},
-
-    {"type": "HAS_PERSONA", "from": "org:hr", "to": "persona:corporate"},
-    {"type": "HAS_PERSONA", "from": "org:fin", "to": "persona:corporate"},
-    {"type": "HAS_PERSONA", "from": "org:ga", "to": "persona:corporate"},
-
-    {"type": "GOVERNED_BY", "from": "persona:company-default", "to": "pol:auditable-logging"},
-    {"type": "GOVERNED_BY", "from": "persona:company-default", "to": "pol:human-oversight"},
-
-    {"type": "GOVERNED_BY", "from": "persona:aoc-dev", "to": "pol:quality-groundedness"},
-
-    {"type": "GOVERNED_BY", "from": "persona:secops", "to": "pol:zone-gate"},
-
-    {"type": "GOVERNED_BY", "from": "persona:offensive", "to": "pol:no-malicious-security"},
-
-    {"type": "GOVERNED_BY", "from": "persona:consulting", "to": "pol:quality-groundedness"},
-    {"type": "GOVERNED_BY", "from": "persona:consulting", "to": "pol:no-cross-tenant"},
-
-    {"type": "GOVERNED_BY", "from": "persona:corporate", "to": "pol:pii-hr-fin"},
-    {"type": "GOVERNED_BY", "from": "persona:corporate", "to": "pol:l3-local-only"},
-    {"type": "GOVERNED_BY", "from": "persona:corporate", "to": "pol:financial-approval"}
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:dawn",
+      "to": "persona:company-default"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:aoc-dev",
+      "to": "persona:aoc-dev"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:aoc-lab",
+      "to": "persona:aoc-dev"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ccc",
+      "to": "persona:secops"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ccc",
+      "to": "persona:offensive"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:it-dc",
+      "to": "persona:secops"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ax-univ",
+      "to": "persona:consulting"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ax-sec",
+      "to": "persona:consulting"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ax-mkt",
+      "to": "persona:consulting"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:hr",
+      "to": "persona:corporate"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:fin",
+      "to": "persona:corporate"
+    },
+    {
+      "type": "HAS_PERSONA",
+      "from": "org:ga",
+      "to": "persona:corporate"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:company-default",
+      "to": "pol:auditable-logging"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:company-default",
+      "to": "pol:human-oversight"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:aoc-dev",
+      "to": "pol:quality-groundedness"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:secops",
+      "to": "pol:zone-gate"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:offensive",
+      "to": "pol:no-malicious-security"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:consulting",
+      "to": "pol:quality-groundedness"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:consulting",
+      "to": "pol:no-cross-tenant"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:corporate",
+      "to": "pol:pii-hr-fin"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:corporate",
+      "to": "pol:l3-local-only"
+    },
+    {
+      "type": "GOVERNED_BY",
+      "from": "persona:corporate",
+      "to": "pol:financial-approval"
+    }
   ]
 }

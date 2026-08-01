@@ -167,9 +167,11 @@ fi
   || die "dawn-agents 설치 실패"; }
 [[ -d aoc ]] && { ./.venv/bin/python -m pip install -q -e "aoc[dev]" \
   || die "dawn-aoc 설치 실패"; }
+[[ -d apps/groupware ]] && { ./.venv/bin/python -m pip install -q -e "apps/groupware[dev]" \
+  || die "dawn-web 설치 실패"; }
 ok "설치: $(./.venv/bin/python - <<'PY'
 mods = []
-for name in ("dawn_core", "dawn_agents", "dawn_aoc"):
+for name in ("dawn_core", "dawn_agents", "dawn_aoc", "dawn_groupware"):
     try:
         m = __import__(name)
         mods.append(f"{name.replace('_', '-')} {getattr(m, '__version__', '?')}")
@@ -253,7 +255,9 @@ cat <<EOF
     make check                lint · test · 통제 평면 · 레지스트리
     dawn registry --tree      조직도
     dawn gate <agent-id>      그 에이전트가 실제로 뭘 할 수 있는지
-    make office               픽셀 오피스 관제 콘솔 (http://localhost:8800)
+    make office-bg            픽셀 오피스 관제 콘솔  (:8800)
+    make web-bg               홈페이지(:8810) + 그룹웨어(:8811)
+    make portal-bootstrap     그룹웨어 첫 관리자 계정 — 비밀번호가 1회만 출력된다
     make aoc                  관제 1회전 — 수집 → 탐지 → 트리아지
 
   ${B}읽을 것${Z}

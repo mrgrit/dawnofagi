@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dawn-web"
+version = "0.1.0"
+description = "the dawn of AGI — 공개 홈페이지 + 사내 그룹웨어 (P4)"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "dawn-core",
+  "dawn-agents",
+  "dawn-aoc",
+  "starlette>=0.37",
+  "uvicorn>=0.29",
+  "itsdangerous>=2.1",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4", "httpx>=0.27"]
+
+[project.scripts]
+dawn-web = "dawn_groupware.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dawn_groupware*"]
