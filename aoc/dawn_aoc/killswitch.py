@@ -135,6 +135,19 @@ class KillSwitch:
             st.blocked_tools.append(tool)
         return self._save(st, f"block_tool:{tool}", by, reason, case_id)
 
+    def restore_credentials(self, agent_id: str, *, reason: str, by: str,
+                            case_id: str = "") -> ControlState:
+        """자격증명 재발급 — **사람만**.
+
+        회수만 있고 되돌릴 길이 없으면 아무도 회수 버튼을 안 누른다.
+        (실제로는 자격증명을 새로 발급하고 이 플래그를 내린다 — 여기는 기록이다)
+        """
+        if not by.startswith("human"):
+            raise PermissionError("자격증명 재발급은 사람만 한다 (by=human:<이름>)")
+        st = self.get(agent_id)
+        st.credentials_revoked = False
+        return self._save(st, "restore_credentials", by, reason, case_id)
+
     def unblock_tool(self, agent_id: str, tool: str, *, reason: str, by: str,
                      case_id: str = "") -> ControlState:
         """도구 차단 해제 — **사람만**. 되돌리는 쪽이 더 위험한 방향이다."""

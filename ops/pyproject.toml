@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dawn-ops"
+version = "0.1.0"
+description = "the dawn of AGI — 통합·레드팀·인시던트 리허설·운영 (P6)"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = ["dawn-core", "dawn-agents", "dawn-aoc", "dawn-web", "dawn-biz"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+dawn-ops = "dawn_ops.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dawn_ops*"]

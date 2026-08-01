@@ -152,6 +152,8 @@ apps/groupware/               공개 홈페이지 + 사내 그룹웨어         
 apps/website/                 공개 홈페이지 정적 자산                    (P4)
 biz/                          업무 시스템 — 문서·CRM·프로젝트·경리        (P5)
   dawn_biz/                     업무 DB · EG 자산 대조 · 업무 스킬 · 업무 에이전트
+ops/                          통합·레드팀·리허설·운영                     (P6)
+  dawn_ops/                     E2E · 오펜시브 레드팀 · 인시던트 리허설 · 멀티테넌트
 infra/                        배포 · el34 연동
 docs/
   START_HERE.md                 구축 순서 P0→P6
@@ -160,6 +162,7 @@ docs/
   governance/CONTROL_PLANE.md   통제 평면 사용법 (미리 막는 법)
   governance/AOC_OPERATIONS.md  관제 콘솔 운영 (벌어진 뒤 잡는 법)
   governance/PORTAL_GUIDE.md    그룹웨어 — 사람이 개입하는 통로
+  governance/RUNBOOK.md         운영 러너북 (사람 운영자용)
 BUILD_LOG.md                  진행 기록      QUESTIONS.md  사람에게 묻는 큐
 ```
 
@@ -194,7 +197,7 @@ make health                # 도달성 + 인증 확인
 | **P3** | AOC 관제 시스템 · 픽셀 오피스 | ✅ 완료 |
 | **P4** | 홈페이지 · 그룹웨어 | ✅ 완료 |
 | **P5** | 업무 시스템 (문서·CRM·프로젝트·경리) | ✅ 완료 |
-| P6 | 통합 · 레드팀 검증 · 자사 운영 개시 | ⬜ |
+| **P6** | 통합 · 레드팀 검증 · 자사 운영 개시 | ✅ 완료 |
 
 각 단계의 DoD와 자기검증 결과는 [`BUILD_LOG.md`](BUILD_LOG.md).
 
@@ -205,7 +208,7 @@ make health                # 도달성 + 인증 확인
 ```bash
 make help            # 전체 목록
 make check           # lint · test · registry · compile · control-lint · eg-validate · eg-bridge
-make verify          # P0~P5 자기검증 (DoD + 개입·게이트·관제·그룹웨어·업무 실증)
+make verify          # P0~P6 전체 자기검증
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
 
@@ -240,6 +243,12 @@ make biz-docs Q="검색어"                 # 문서·지식 전문 검색
 make biz-egcheck                        # 업무 데이터 ↔ EG 자산 정합성
 make biz-run W=inquiry S=1              # 업무 에이전트 기동 (모델 호출)
 make biz-emit E=crm.inquiry.new DRY=1   # 업무 이벤트 → 훅
+
+make ops-status                         # 전 계층 현황 한 장
+make e2e LIVE=1                         # 엔드투엔드 — 8구간 개별 검사
+make redteam                            # 오펜시브 레드팀 + 탐지 커버리지
+make rehearsal                          # 인시던트 3종 리허설 + 비가역 대응 실증
+make tenant                             # 멀티테넌트 점검 + 고객 온보딩 절차
 ```
 
 ### 접속

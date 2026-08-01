@@ -28,16 +28,16 @@ hooks:  ## git 훅 재설치 (gitleaks 포함)
 # ══ 품질 ════════════════════════════════════════════════════════════════
 .PHONY: lint
 lint:  ## ruff lint
-	@$(PY) -m ruff check packages infra scripts eg agents aoc apps/groupware biz
+	@$(PY) -m ruff check packages infra scripts eg agents aoc apps/groupware biz ops
 
 .PHONY: fmt
 fmt:  ## ruff format (수정)
-	@$(PY) -m ruff format packages infra eg agents scripts aoc apps/groupware biz
-	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc apps/groupware biz
+	@$(PY) -m ruff format packages infra eg agents scripts aoc apps/groupware biz ops
+	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc apps/groupware biz ops
 
 .PHONY: test
 test:  ## pytest
-	@$(PY) -m pytest packages agents aoc apps/groupware biz -q
+	@$(PY) -m pytest packages agents aoc apps/groupware biz ops -q
 
 # ══ 레지스트리 · 통제 평면 ══════════════════════════════════════════════
 .PHONY: registry
@@ -311,18 +311,40 @@ biz-run:  ## 업무 에이전트 기동 — make biz-run W=inquiry S=1 [APPROVE=
 biz-emit:  ## 업무 이벤트 → 훅 기동 — make biz-emit E=crm.inquiry.new P='{"inquiry_id":1}'
 	@$(PY) -m dawn_biz.cli emit $(E) --payload '$(P)' $(if $(DRY),--dry-run,)
 
+# ══ 통합·운영 (P6) ═══════════════════════════════════════════════════════
+.PHONY: ops-status
+ops-status:  ## 전 계층 현황 한 장 (조직·에이전트·업무·관제)
+	@$(PY) -m dawn_ops.cli status
+
+.PHONY: e2e
+e2e:  ## 엔드투엔드 — 요구→에이전트→업무→관제→축적 (LIVE=1 로 모델 호출)
+	@$(PY) -m dawn_ops.cli e2e $(if $(LIVE),--live,)
+
+.PHONY: redteam
+redteam:  ## 오펜시브 레드팀 + 탐지 커버리지 (놓친 것마다 보강 제안)
+	@$(PY) -m dawn_ops.cli redteam $(if $(LIVE),--live,)
+
+.PHONY: rehearsal
+rehearsal:  ## 인시던트 3종 리허설 + 비가역 대응 실증 (KEEP=1 로 상태 보존)
+	@$(PY) -m dawn_ops.cli rehearsal $(if $(KEEP),--keep,)
+
+.PHONY: tenant
+tenant:  ## 멀티테넌트 준비 점검 + 고객 온보딩 절차
+	@$(PY) -m dawn_ops.cli tenant
+
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
 check: lint test registry compile control-lint eg-validate eg-bridge biz-egcheck  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0~P5 자기검증 (DoD + 개입·게이트·관제·그룹웨어·업무 실증)
+verify:  ## P0~P6 전체 자기검증 (통제·EG·하네스·관제·그룹웨어·업무·통합)
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
 	@bash scripts/verify-p2.sh
 	@bash scripts/verify-p3.sh
 	@bash scripts/verify-p4.sh
 	@bash scripts/verify-p5.sh
+	@bash scripts/verify-p6.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔
