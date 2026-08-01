@@ -60,7 +60,7 @@ make registry       # 조직·사업 레지스트리 검증 및 요약
 make health         # el34 Assessor 헬스체크
 make check          # lint + test + control-lint + registry (CI와 동일)
 make aoc            # 관제 1회전 — 수집 → 탐지 → 트리아지
-make office         # 픽셀 오피스 관제 콘솔 (http://<호스트 IP>:8800)
+make office-bg      # 픽셀 오피스 관제 콘솔 백그라운드 (http://<호스트 IP>:8800)
 ```
 
 ## 진행 상황

@@ -199,6 +199,25 @@ aoc-replay:  ## 타임라인 리플레이 — make aoc-replay T=<trace-id>
 office:  ## 픽셀 오피스 관제 콘솔 — 이 호스트 IP:8800 (PORT/HOST 로 변경)
 	@$(PY) -m dawn_aoc.cli serve --port $${PORT:-8800} --host $${HOST:-0.0.0.0}
 
+.PHONY: office-bg
+office-bg:  ## 픽셀 오피스 백그라운드 기동 — SSH 를 끊어도 살아 있다
+	@mkdir -p var/aoc
+	@if [ -s var/aoc/serve.pid ] && kill -0 "$$(cat var/aoc/serve.pid)" 2>/dev/null; then \
+	   echo "이미 떠 있다 (pid $$(cat var/aoc/serve.pid))"; \
+	 else \
+	   setsid nohup $(PY) -m dawn_aoc.cli serve --port $${PORT:-8800} \
+	     --host $${HOST:-0.0.0.0} > var/aoc/serve.log 2>&1 < /dev/null & \
+	   sleep 2; pgrep -f "[d]awn.aoc.* serve" | head -1 > var/aoc/serve.pid; \
+	 fi
+	@cat var/aoc/serve.log
+	@echo "  로그: var/aoc/serve.log   ·  중지: make office-stop"
+
+.PHONY: office-stop
+office-stop:  ## 픽셀 오피스 중지
+	@pgrep -f "[d]awn.aoc.* serve" | xargs -r kill 2>/dev/null \
+	   && echo "중지됨" || echo "떠 있지 않다"
+	@rm -f var/aoc/serve.pid
+
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
 check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 동일한 전체 검사
