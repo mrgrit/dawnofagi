@@ -7,3 +7,4 @@ agents: []
 work_domains: [operations]
 zone: int
 escalation_to: itops-ccc
+eg_org: org:biz-support          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

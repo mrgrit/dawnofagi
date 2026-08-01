@@ -2,21 +2,88 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Team manifest — org/divisions/*/*/team.yaml",
   "type": "object",
-  "required": ["id", "division", "name", "mission", "agents"],
+  "required": [
+    "id",
+    "division",
+    "name",
+    "mission",
+    "agents"
+  ],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "division": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "name": { "type": "string", "minLength": 1 },
-    "mission": { "type": "string", "minLength": 5 },
-    "persona_default": { "type": "string" },
-    "agents": { "type": "array", "items": { "type": "string" } },
-    "work_domains": { "type": "array", "items": { "type": "string" } },
-    "zone": { "enum": ["ext", "pipe", "dmz", "int", "user"] },
-    "max_sensitivity": { "enum": ["L0", "L1", "L2", "L3"] },
-    "escalation_to": { "type": ["string", "null"] },
-    "subteams_planned": { "type": "array", "items": { "type": "string" } },
-    "references": { "type": "array", "items": { "type": "string" } },
-    "notes": { "type": "string" }
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "division": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission": {
+      "type": "string",
+      "minLength": 5
+    },
+    "persona_default": {
+      "type": "string"
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "work_domains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "zone": {
+      "enum": [
+        "ext",
+        "pipe",
+        "dmz",
+        "int",
+        "user"
+      ]
+    },
+    "max_sensitivity": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
+    "escalation_to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subteams_planned": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    },
+    "eg_org": {
+      "type": "string",
+      "pattern": "^org:[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "EG OrgUnit 노드 id — 통제 평면과 EG 를 잇는 열쇠"
+    }
   }
 }

@@ -15,6 +15,8 @@ import json
 import sys
 
 from .control_plane import CompileError, compile_agent, compile_all, write_bundles
+from .eg.cli import add_subparser as add_eg_subparser
+from .eg.store import EGError
 from .lint import format_report
 from .lint import run as run_lint
 from .registry import Registry, RegistryError
@@ -171,6 +173,8 @@ def build_parser() -> argparse.ArgumentParser:
     lt = sub.add_parser("lint", help="Control Readiness Score")
     lt.add_argument("--json", action="store_true")
     lt.set_defaults(func=cmd_lint)
+
+    add_eg_subparser(sub)
     return p
 
 
@@ -178,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (RegistryError, CompileError) as exc:
+    except (RegistryError, CompileError, EGError) as exc:
         print(_tty("✘ " + str(exc), C_ERR), file=sys.stderr)
         return 1
 

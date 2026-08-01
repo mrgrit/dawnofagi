@@ -8,3 +8,4 @@ work_domains: [corporate]
 zone: user
 max_sensitivity: L3
 escalation_to: null
+eg_org: org:fin          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

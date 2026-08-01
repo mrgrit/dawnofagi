@@ -7,3 +7,4 @@ businesses: [aoc-platform, foundation-model]
 teams: [aoc-dev, aoc-ops, aoc-lab]
 zone: dmz
 autonomy_default: A1
+eg_org: org:aoc          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

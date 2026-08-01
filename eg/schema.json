@@ -1,0 +1,158 @@
+{
+  "schema_version": "0.1.0",
+  "name": "the dawn of AGI — Enterprise Experience Graph — Governance Schema",
+  "description": "bastion 런타임 EG(Task/Finding/Observation/Skill) 위에 얹는 전사 거버넌스 계층. 사람이 초기에 채우는 씨앗 노드로 회사를 EG로 세운다 (회사: the dawn of AGI / 다노파기). 사람의 개입은 이 노드들의 수정으로 이루어진다.",
+  "conventions": {
+    "id_format": "<type_prefix>:<slug>  예) org:aoc-dev, pol:no-cross-tenant, sec:L3",
+    "id_prefixes": {
+      "OrgUnit": "org", "Persona": "persona", "Policy": "pol", "SecurityLevel": "sec",
+      "Zone": "zone", "Asset": "asset", "AutonomyLevel": "auto", "ModelPolicy": "model"
+    },
+    "layer": "노드마다 layer 속성 필수: 'governance'(사람이 관리) | 'runtime'(에이전트 자동)",
+    "provenance": "거버넌스 노드는 created_by(사람 식별자)와 updated_at을 반드시 가진다 — 개입 추적용",
+    "eg_mode_mapping": "layer=governance & node in {Policy,Persona} → EG_MODE 'playbook'에서 주입 / Task,Finding,Observation → 'experience'에서 주입 / 전체 → 'full'"
+  },
+
+  "node_types": {
+    "OrgUnit": {
+      "layer": "governance",
+      "desc": "조직 단위(본부/부서/팀). 사람 조직도를 그대로 상속. 에이전트 팀은 이 노드에 매핑된다.",
+      "properties": {
+        "id": "string, required",
+        "name": "string, required",
+        "type": {"enum": ["bureau", "dept", "team"], "required": true},
+        "mission": "string, required — 이 조직의 미션(EG 주입 시 팀 에이전트 시스템 프롬프트에 반영)",
+        "outputs": "string[] — 주요 산출물",
+        "self_first_order": "int — 자사-우선 로드맵 상 순서(없으면 null)",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "Persona": {
+      "layer": "governance",
+      "desc": "조직/역할의 일하는 방식·말투·행동원칙. 사람이 이것을 수정하면 다음 작업부터 해당 조직 에이전트 행동이 바뀐다(핵심 개입 지점).",
+      "properties": {
+        "id": "string, required",
+        "role": "string, required — 예: '보안운영 에이전트', '경리 처리 에이전트'",
+        "tone": "string — 커뮤니케이션 톤",
+        "principles": "string[] — 행동 원칙(하드 룰)",
+        "prohibited": "string[] — 금지 행동",
+        "escalation_rule": "string — 언제 인간에게 에스컬레이션하는가",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "Policy": {
+      "layer": "governance",
+      "desc": "회사 규정을 기계가 판정 가능한 형태로 옮긴 것. 에이전트 행동을 제약. skill_preview 위험도와 결합해 게이트를 결정.",
+      "properties": {
+        "id": "string, required",
+        "statement": "string, required — 규정 본문(사람이 읽는 형태)",
+        "rule": "string — 판정 가능한 조건식(의사코드). 예: 'action.destructive AND asset.sec_rank>=2 => require HITL'",
+        "category": {"enum": ["security", "privacy", "compliance", "quality", "financial", "hr"], "required": true},
+        "severity": {"enum": ["low", "medium", "high", "critical"], "required": true},
+        "enforcement": {"enum": ["block", "require_hitl", "warn", "log_only"], "required": true},
+        "source_ref": "string — 근거 규정/법령 출처(예: 'EU AI Act Art.14', '사내 정보보안지침 3.2')",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "SecurityLevel": {
+      "layer": "governance",
+      "desc": "보안등급. el34 존 민감도와 정렬(rank 0~3). 모든 자산이 이것으로 분류된다. 심각도 산정·모델 배치·게이트의 기준.",
+      "properties": {
+        "id": "string, required — sec:L0..sec:L3",
+        "rank": {"type": "int 0..3", "required": true},
+        "label": "string, required — 공개/내부/기밀/극비",
+        "handling_rule": "string, required — 이 등급 데이터 취급 규칙",
+        "model_constraint": "string — 이 등급에서 허용되는 모델(예: 'L3 → 로컬 모델 전용')",
+        "requires_hitl": "boolean — 이 등급 자산 대상 비가역 행동에 HITL 필수 여부",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "Zone": {
+      "layer": "governance",
+      "desc": "el34 실제 네트워크 세그먼트. 섹터 배정과 픽셀 오피스 방의 근거. 텔레메트리에서 위치가 자동 결정되는 실물 앵커.",
+      "properties": {
+        "id": "string, required — zone:ext|pipe|dmz|int|user",
+        "cidr": "string, required — IP 대역",
+        "sensitivity": "string — 존 성격(외부/경유/제한/통제/내부)",
+        "is_gate": "boolean — 정책 집행 지점(문)인가. pipe만 true",
+        "pixel_room": "string — 픽셀 오피스 매핑(Zone 0~3/문)",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "Asset": {
+      "layer": "governance",
+      "desc": "보호 대상(데이터/시스템/도구). 런타임 Task/Finding/Observation이 이 노드에서 거버넌스와 만난다. 섹터 배정의 최소 단위.",
+      "properties": {
+        "id": "string, required",
+        "name": "string, required",
+        "kind": {"enum": ["data", "system", "tool", "mcp"], "required": true},
+        "irreversibility": {"enum": ["read", "write", "execute", "irreversible"], "required": true, "desc": "비가역성 — 심각도 매트릭스 축"},
+        "owner_org": "string — 소유 조직 id(OrgUnit)",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "AutonomyLevel": {
+      "layer": "governance",
+      "desc": "자율화 등급 A0~A3. 조직이 어느 등급으로 운영되는지 + 승급 조건. 위치×등급 조합이 정책 위반 판정에 쓰임.",
+      "properties": {
+        "id": "string, required — auto:A0..auto:A3",
+        "level": {"type": "int 0..3", "required": true},
+        "label": "string, required",
+        "gate_rule": "string, required — 이 등급에서 인간 게이트가 걸리는 조건",
+        "promote_kpi": "string — 다음 등급으로 승급하는 KPI 임계(개입률·오탐율 등)",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+    "ModelPolicy": {
+      "layer": "governance",
+      "desc": "부서별 모델 배치 규칙. 동적 라우팅의 근거(EG에 넣어 부서 에이전트가 어떤 모델을 쓸지 결정).",
+      "properties": {
+        "id": "string, required",
+        "model": "string, required — 예: 'CC Opus', 'CC Haiku', 'gpt-oss:120b'",
+        "cost_tier": {"enum": ["high", "mid", "low", "local"], "required": true},
+        "rationale": "string — 배치 근거",
+        "created_by": "string, required",
+        "updated_at": "iso8601, required"
+      }
+    },
+
+    "Task": {"layer": "runtime", "desc": "bastion EG 기존 노드. 완료 작업. eg_record_task로 자동 축적.", "managed_by": "agent"},
+    "Finding": {"layer": "runtime", "desc": "bastion EG 기존 노드. 탐지/취약점. eg_record_finding.", "managed_by": "agent"},
+    "Observation": {"layer": "runtime", "desc": "bastion EG 기존 노드. 자산 관찰. eg_record_observation.", "managed_by": "agent"},
+    "Skill": {"layer": "runtime", "desc": "bastion Skill. risk(L/M/H)·destructive 주석 보유. 행동 게이트의 실물.", "managed_by": "system"}
+  },
+
+  "edge_types": {
+    "PART_OF": {"from": "OrgUnit", "to": "OrgUnit", "desc": "조직 계통(팀→부서→본부)"},
+    "HAS_PERSONA": {"from": "OrgUnit", "to": "Persona", "desc": "조직의 일하는 방식"},
+    "USES_MODEL": {"from": "OrgUnit", "to": "ModelPolicy", "desc": "조직의 모델 배치"},
+    "OPERATES_AT": {"from": "OrgUnit", "to": "AutonomyLevel", "desc": "조직의 현재 자율화 등급"},
+    "GOVERNED_BY": {"from": "Persona", "to": "Policy", "desc": "페르소나가 따르는 규정"},
+    "APPLIES_TO": {"from": "Policy", "to": "SecurityLevel", "desc": "규정이 걸리는 보안등급"},
+    "CLASSIFIED_AS": {"from": "Asset", "to": "SecurityLevel", "desc": "자산의 보안등급"},
+    "LOCATED_IN": {"from": "Asset", "to": "Zone", "desc": "자산이 위치한 존"},
+    "MAPS_TO": {"from": "Zone", "to": "SecurityLevel", "desc": "존↔등급 정렬"},
+    "ACTS_ON": {"from": "Skill", "to": "Asset", "desc": "스킬이 다루는 자산(위험도 결합)"},
+    "OWNED_BY": {"from": "Asset", "to": "OrgUnit", "desc": "자산 소유 조직"},
+    "PERFORMED_BY": {"from": "Task", "to": "OrgUnit", "desc": "런타임: 작업 수행 조직"},
+    "TOUCHED": {"from": "Task", "to": "Asset", "desc": "런타임: 작업이 건드린 자산 — 거버넌스와 만나는 지점"},
+    "ABOUT": {"from": "Finding", "to": "Asset", "desc": "런타임: finding 대상 자산"},
+    "OBSERVES": {"from": "Observation", "to": "Asset", "desc": "런타임: 관찰 대상 자산"},
+    "CONSTRAINED_BY": {"from": "Task", "to": "Policy", "desc": "런타임: 작업에 적용된 규정(감사 추적)"}
+  },
+
+  "key_traversals": {
+    "sector_of_task": "Task -TOUCHED-> Asset -LOCATED_IN-> Zone  (에이전트가 지금 어느 섹터/방에 있는가)",
+    "severity_of_action": "Skill.risk + (Asset.irreversibility × Asset -CLASSIFIED_AS-> SecurityLevel.rank)  (심각도 매트릭스)",
+    "gate_decision": "Asset -CLASSIFIED_AS-> SecurityLevel -<-APPLIES_TO- Policy.enforcement  (이 자산 건드릴 때 어떤 게이트)",
+    "model_for_org": "OrgUnit -USES_MODEL-> ModelPolicy.model  (이 부서 에이전트는 어떤 모델)",
+    "intervention_point": "행동이 이상하면 Task -PERFORMED_BY-> OrgUnit -HAS_PERSONA-> Persona 를 수정 → 다음 작업부터 반영"
+  }
+}

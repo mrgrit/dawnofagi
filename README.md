@@ -50,6 +50,50 @@ make control-lint           # Control Readiness Score — 80점 미만이면 CI 
 
 ---
 
+## EG — 회사의 뇌 (또 하나의 손잡이)
+
+통제 평면이 *어떻게 행동하는가*(문서)라면, EG 는 *무엇을 아는가*(그래프)다.
+조직·규정·보안등급·자산·페르소나·모델배치가 노드로 있고, 에이전트는 매 작업 전 여기를 조회한다.
+
+```bash
+make eg-load                  # 시드 주입 (bastion 런타임 EG 위에 거버넌스 계층)
+make eg-validate              # 무결성 + 핵심 순회 실증 (오류 0)
+make eg-org O=org:hr          # 인사팀 → 페르소나 → 정책 → 모델 → 자율화
+make eg-severity              # 전 자산 심각도 (비가역성 × 보안등급)
+make eg-search Q="로컬 모델"   # eg_search
+make eg-bridge                # 통제 평면 ↔ EG 정합성 (어긋나면 CI 실패)
+make eg-routing               # 에이전트별 실효 모델 (L3 관여 시 로컬 강제)
+```
+
+**사람의 개입 = 시드 수정.** 코드는 건드리지 않는다.
+
+| 바꾸려는 것 | 고칠 곳 |
+|---|---|
+| 에이전트 행동·말투 | `eg/seed/03_personas.json` 의 `principles` / `prohibited` |
+| 규정·게이트 강도 | `eg/seed/02_policies.json` 의 `rule` / `enforcement` |
+| 자율화 승급 | `eg/seed/01_foundation.json` 의 `OPERATES_AT` 엣지 |
+| 자산 민감도 | `eg/seed/04_assets.json` 의 `CLASSIFIED_AS` |
+| 부서 모델 교체 | `eg/seed/01_foundation.json` 의 `USES_MODEL` 엣지 |
+
+고친 뒤: `make eg-validate && make eg-load && make eg-bridge`
+
+---
+
+## "로컬 모델"은 사내 GPU 서버다
+
+이 호스트에 GPU 는 없다. `pol:l3-local-only` 가 요구하는 로컬 모델은 **VPN 너머 사내 GPU 서버**에서 돈다.
+인사·재무·경리 에이전트는 이 서버 없이는 일하지 못한다 — 클라우드 폴백은 없다.
+
+```bash
+make vpn          # 스플릿 라우팅으로 연결 (el34 랩을 끊지 않는다). 사람이 실행
+make gpu-check    # 도달 + 모델 목록
+make gpu-test     # 실제 추론 1회
+```
+
+자세히: [`infra/gpu/README.md`](infra/gpu/README.md)
+
+---
+
 ## 새 사업을 붙이는 법
 
 사업·조직·에이전트는 **코드가 아니라 매니페스트로 존재한다.** 코드 수정 없이 늘어난다.
@@ -92,7 +136,11 @@ org/                          조직·사업·에이전트 레지스트리 (YAML
   tools.yaml                    도구 카탈로그 (namespace.action + 위험도)
 work/                         L3 — 재사용 가능한 업무 SOP (*_WORK.md)
 packages/dawn_core/           레지스트리 로더 · 게이트 병합 · 통제 평면 컴파일러 · 린터
-eg/                           Experience Graph — 회사의 뇌            (P1)
+eg/                           Experience Graph — 회사의 뇌
+  schema.json                   거버넌스 8종 + 런타임 4종 노드/엣지 정의
+  seed/                         시드 — 사람이 고치는 곳 (조직·정책·페르소나·자산)
+  validate.py                   무결성 + 핵심 순회 검증 (오류 0 이어야 주입)
+  snapshots/                    주입 스냅샷 (롤백·감사)
 agents/                       에이전트 하네스 · 워커 런타임            (P2)
 aoc/                          관제 시스템 (수집·탐지·트리아지·대응)     (P3)
 apps/                         홈페이지 · 그룹웨어 · 픽셀오피스          (P4/P5)
@@ -131,7 +179,7 @@ make health                # 도달성 + 인증 확인
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | **P0** | 부트스트랩 — 모노레포·CI·시크릿·el34 연결·**통제 평면** | ✅ 완료 |
-| P1 | Experience Graph — 회사의 뇌 | ⏸ [Q1](QUESTIONS.md) 대기 |
+| **P1** | Experience Graph — 회사의 뇌 (노드 74 · 엣지 136) | ✅ 완료 |
 | P2 | 에이전트 하네스·루프·행동 게이트 | ⬜ |
 | P3 | AOC 관제 시스템 · 픽셀 오피스 | ⬜ |
 | P4 | 홈페이지 · 그룹웨어 | ⬜ |
@@ -146,8 +194,8 @@ make health                # 도달성 + 인증 확인
 
 ```bash
 make help            # 전체 목록
-make check           # lint · test · registry · compile · control-lint  (CI와 동일)
-make verify          # P0 자기검증 (DoD + 개입·게이트 실증)
+make check           # lint · test · registry · compile · control-lint · eg-validate · eg-bridge
+make verify          # P0+P1 자기검증 (DoD + 개입·게이트 실증)
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
 ```

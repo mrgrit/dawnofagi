@@ -63,6 +63,64 @@ prompt:  ## 에이전트 실효 시스템 프롬프트 출력 — make prompt A=
 	@test -n "$(A)" || { echo "사용법: make prompt A=ccc-soc-triage-01"; exit 2; }
 	@$(PY) -m dawn_core.cli compile $(A) --prompt
 
+# ══ EG (Experience Graph — 회사의 뇌) ═══════════════════════════════════
+BASTION_SEED ?= $(HOME)/el34/bastion/src/data/seed/bastion_graph_seed.db
+
+.PHONY: eg-load
+eg-load:  ## EG 시드 주입 (bastion 런타임 EG 위에 거버넌스 계층)
+	@$(PY) -m dawn_core.cli eg load --from-bastion $(BASTION_SEED)
+
+.PHONY: eg-validate
+eg-validate:  ## EG 검증 — 무결성 + 핵심 순회 실증 (오류 0 이어야 함)
+	@$(PY) eg/validate.py --db var/eg/bastion_graph.db
+
+.PHONY: eg-stats
+eg-stats:  ## EG 현황 (계층·노드·엣지)
+	@$(PY) -m dawn_core.cli eg stats
+
+.PHONY: eg-org
+eg-org:  ## 조직 프로파일 = 개입 지점 — make eg-org O=org:ccc
+	@test -n "$(O)" || { echo "사용법: make eg-org O=org:ccc"; exit 2; }
+	@$(PY) -m dawn_core.cli eg org $(O)
+
+.PHONY: eg-search
+eg-search:  ## eg_search — make eg-search Q="로컬 모델"
+	@test -n "$(Q)" || { echo ' 사용법: make eg-search Q="로컬 모델"'; exit 2; }
+	@$(PY) -m dawn_core.cli eg search "$(Q)"
+
+.PHONY: eg-severity
+eg-severity:  ## 전 자산 심각도 (비가역성 × 보안등급)
+	@$(PY) -m dawn_core.cli eg severity
+
+.PHONY: eg-bridge
+eg-bridge:  ## 통제 평면 ↔ EG 정합성 대조 (어긋나면 실패)
+	@$(PY) -m dawn_core.cli eg bridge
+
+.PHONY: eg-routing
+eg-routing:  ## 에이전트별 실효 모델 라우팅 표
+	@$(PY) -m dawn_core.cli eg routing
+
+.PHONY: eg-snapshot
+eg-snapshot:  ## EG 스냅샷 저장 (롤백·감사)
+	@$(PY) -m dawn_core.cli eg snapshot --label $${LABEL:-governance}
+
+# ══ 모델 (사내 GPU — 이 호스트에 GPU 없음) ══════════════════════════════
+.PHONY: gpu-check
+gpu-check:  ## 사내 GPU 서버(ollama) 도달 확인 — VPN 필요. L3 업무의 전제
+	@$(PY) infra/gpu/check.py
+
+.PHONY: gpu-test
+gpu-test:  ## GPU 서버에 실제 추론 1회 (경로 검증 — 가장 작은 모델 사용)
+	@$(PY) infra/gpu/check.py --generate
+
+.PHONY: vpn
+vpn:  ## 사내 GPU VPN 연결 (스플릿 라우팅 — el34 보존). 사람이 실행
+	@bash infra/gpu/vpn-connect.sh
+
+.PHONY: vpn-status
+vpn-status:  ## VPN 상태 + el34/GPU 경로 확인
+	@bash infra/gpu/vpn-connect.sh --status
+
 # ══ el34 ════════════════════════════════════════════════════════════════
 .PHONY: health
 health:  ## el34 Assessor 헬스체크 (+ 존 도달성)
@@ -84,11 +142,12 @@ ci-enable:  ## CI 활성화 — infra/ci/*.yml → .github/workflows/ (PAT 에 w
 
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
-check: lint test registry compile control-lint  ## CI와 동일한 전체 검사
+check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0 자기검증 (DoD + 개입·게이트 실증)
+verify:  ## P0+P1 자기검증 (DoD + 개입·게이트 실증)
 	@bash scripts/verify-p0.sh
+	@bash scripts/verify-p1.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔

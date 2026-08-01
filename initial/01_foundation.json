@@ -1,0 +1,115 @@
+{
+  "_comment": "EL34 전사 EG 시드 #1 — 골격(등급·존·자율화·모델). 회사가 아직 없으므로 이 값들이 최초 정의. created_by=founder, updated_at은 부트스트랩 시 자동 채움.",
+  "_meta": {"created_by": "founder", "seed": "01_foundation"},
+
+  "SecurityLevel": [
+    {"id": "sec:L0", "rank": 0, "label": "공개", "handling_rule": "외부 공개 가능. 제약 없음.", "model_constraint": "제약 없음", "requires_hitl": false},
+    {"id": "sec:L1", "rank": 1, "label": "내부", "handling_rule": "사내 한정. 외부 반출 금지.", "model_constraint": "클라우드 모델 허용", "requires_hitl": false},
+    {"id": "sec:L2", "rank": 2, "label": "기밀", "handling_rule": "권한자 한정. 비가역 행동 시 승인 권장.", "model_constraint": "클라우드 허용, 민감 로그는 로컬 권장", "requires_hitl": false},
+    {"id": "sec:L3", "rank": 3, "label": "극비", "handling_rule": "최소권한. 규제 대상. 모든 접근 기록.", "model_constraint": "로컬 모델 전용", "requires_hitl": true}
+  ],
+
+  "Zone": [
+    {"id": "zone:ext",  "cidr": "10.20.30.0/24", "sensitivity": "외부/공개", "is_gate": false, "pixel_room": "Zone 0 · 로비"},
+    {"id": "zone:pipe", "cidr": "10.20.31.0/24", "sensitivity": "경유/검사", "is_gate": true,  "pixel_room": "존 사이의 문"},
+    {"id": "zone:dmz",  "cidr": "10.20.32.0/24", "sensitivity": "제한",     "is_gate": false, "pixel_room": "Zone 2 · 제한"},
+    {"id": "zone:int",  "cidr": "10.20.40.0/24", "sensitivity": "통제",     "is_gate": false, "pixel_room": "Zone 3 · 통제"},
+    {"id": "zone:user", "cidr": "10.20.33.0/24", "sensitivity": "내부",     "is_gate": false, "pixel_room": "Zone 1 · 내부"}
+  ],
+
+  "AutonomyLevel": [
+    {"id": "auto:A0", "level": 0, "label": "전 건 인간 승인", "gate_rule": "모든 행동에 인간 승인", "promote_kpi": "도입 초기·고위험 도메인 기본값"},
+    {"id": "auto:A1", "level": 1, "label": "에이전트 제안→원클릭 승인", "gate_rule": "실행 전 인간 원클릭 승인", "promote_kpi": "오탐율<5% 4주 유지 시 A2"},
+    {"id": "auto:A2", "level": 2, "label": "자율 실행+샘플 검토", "gate_rule": "가역·저위험 자율, 표본 사후 검토", "promote_kpi": "개입률<2% & 판정정확도>95% 시 A3"},
+    {"id": "auto:A3", "level": 3, "label": "완전 자율", "gate_rule": "비가역·고심각(sec_rank>=2 AND irreversible)만 인간 게이트", "promote_kpi": "성숙 목표 상태"}
+  ],
+
+  "ModelPolicy": [
+    {"id": "model:opus",    "model": "CC Opus",      "cost_tier": "high",  "rationale": "비가역·고복잡·R&D·EG 커리큘럼 설계"},
+    {"id": "model:sonnet",  "model": "CC Sonnet",    "cost_tier": "mid",   "rationale": "관제·대응·컨설팅 정형부·공격 시뮬레이션"},
+    {"id": "model:haiku",   "model": "CC Haiku",     "cost_tier": "low",   "rationale": "정형·반복·저위험 업무"},
+    {"id": "model:gptoss",  "model": "gpt-oss:120b", "cost_tier": "local", "rationale": "민감 로그·데이터주권. bastion 기존 운영"},
+    {"id": "model:openlocal","model": "DGX Spark + open model", "cost_tier": "local", "rationale": "인사·재무 등 민감 데이터 로컬 처리"}
+  ],
+
+  "OrgUnit": [
+    {"id": "org:el34", "name": "EL34 Inc.", "type": "bureau", "mission": "AOC와 AX를 자사부터 실현하여 판매한다 — We are our own first customer", "outputs": [], "self_first_order": 0},
+
+    {"id": "org:aoc", "name": "AOC본부", "type": "bureau", "mission": "에이전트 관제 서비스를 자사 대상으로 먼저 개발하고 외부 판매한다", "outputs": ["AOC 플랫폼"], "self_first_order": 1},
+    {"id": "org:aoc-dev", "name": "AOC 개발부", "type": "dept", "mission": "관제 시스템·시각화 개발과 초기 EG 구축", "outputs": ["관제 플랫폼", "픽셀 오피스 시각화", "EG 커리큘럼"], "self_first_order": 1},
+    {"id": "org:aoc-ops", "name": "AOC 운영부", "type": "dept", "mission": "전문가 파견·설치·유지보수·제품관리", "outputs": ["배포 패키지", "SLA 리포트"], "self_first_order": 5},
+    {"id": "org:aoc-lab", "name": "AOC 연구소", "type": "dept", "mission": "요구 분석·사전 컨설팅·관제 방법론 개발", "outputs": ["방법론 문서", "탐지 카탈로그", "AOC-CMM"], "self_first_order": 1},
+
+    {"id": "org:ax", "name": "AX본부", "type": "bureau", "mission": "자사 업무를 먼저 AI 전환하여 레퍼런스로 만든 뒤 판매한다", "outputs": ["AX 컨설팅·제품"], "self_first_order": 3},
+    {"id": "org:ax-univ", "name": "대학AX사업부", "type": "dept", "mission": "대학 전 전공·학사행정·국고사업 AI 전환", "outputs": ["대학 AX 컨설팅·제품"], "self_first_order": 5},
+    {"id": "org:ax-sec", "name": "보안AX사업부", "type": "dept", "mission": "AI 에이전트 기반 보안산업 AI 전환(tw2)", "outputs": ["보안 AX 컨설팅·제품"], "self_first_order": 3},
+    {"id": "org:ax-mkt", "name": "마케팅AX사업부", "type": "dept", "mission": "마케팅 분야 AI 전환", "outputs": ["마케팅 AX 컨설팅·제품"], "self_first_order": 3},
+
+    {"id": "org:it", "name": "IT운영본부", "type": "bureau", "mission": "인프라 운영과 보안. AOC 방법론 검증장", "outputs": [], "self_first_order": 2},
+    {"id": "org:it-dc", "name": "데이터센터운영팀", "type": "team", "mission": "el34 인프라 운영", "outputs": [], "self_first_order": 2},
+    {"id": "org:it-support", "name": "IT지원팀", "type": "team", "mission": "사내 IT 기기·네트워크 운영", "outputs": [], "self_first_order": null},
+    {"id": "org:ccc", "name": "CCC부", "type": "team", "mission": "사이버보안 관제 조직이자 AOC 방법론 검증장·첫 고객", "outputs": [], "self_first_order": 2},
+    {"id": "org:biz-support", "name": "사업지원팀", "type": "team", "mission": "AOC·AX 사업 전산 지원", "outputs": [], "self_first_order": null},
+
+    {"id": "org:mgmt", "name": "경영관리부", "type": "bureau", "mission": "코퍼레이트 운영. 정형 업무 자동화 1순위", "outputs": [], "self_first_order": 3},
+    {"id": "org:hr", "name": "인사팀", "type": "team", "mission": "채용·평가·근태", "outputs": [], "self_first_order": 3},
+    {"id": "org:fin", "name": "재무팀", "type": "team", "mission": "자금·회계·결산", "outputs": [], "self_first_order": 3},
+    {"id": "org:ga", "name": "경리총무팀", "type": "team", "mission": "경비·자산·총무", "outputs": [], "self_first_order": 3}
+  ],
+
+  "_ccc_subteams_note": "CCC부의 SOC·CTI·분석대응·오펜시브·보안운영·보안교육사업 6팀은 운영 안정화 후 개별 OrgUnit(team)으로 분화. 초기엔 org:ccc 하나로 시작.",
+
+  "edges": [
+    {"type": "PART_OF", "from": "org:aoc", "to": "org:el34"},
+    {"type": "PART_OF", "from": "org:ax", "to": "org:el34"},
+    {"type": "PART_OF", "from": "org:it", "to": "org:el34"},
+    {"type": "PART_OF", "from": "org:mgmt", "to": "org:el34"},
+    {"type": "PART_OF", "from": "org:aoc-dev", "to": "org:aoc"},
+    {"type": "PART_OF", "from": "org:aoc-ops", "to": "org:aoc"},
+    {"type": "PART_OF", "from": "org:aoc-lab", "to": "org:aoc"},
+    {"type": "PART_OF", "from": "org:ax-univ", "to": "org:ax"},
+    {"type": "PART_OF", "from": "org:ax-sec", "to": "org:ax"},
+    {"type": "PART_OF", "from": "org:ax-mkt", "to": "org:ax"},
+    {"type": "PART_OF", "from": "org:it-dc", "to": "org:it"},
+    {"type": "PART_OF", "from": "org:it-support", "to": "org:it"},
+    {"type": "PART_OF", "from": "org:ccc", "to": "org:it"},
+    {"type": "PART_OF", "from": "org:biz-support", "to": "org:it"},
+    {"type": "PART_OF", "from": "org:hr", "to": "org:mgmt"},
+    {"type": "PART_OF", "from": "org:fin", "to": "org:mgmt"},
+    {"type": "PART_OF", "from": "org:ga", "to": "org:mgmt"},
+
+    {"type": "MAPS_TO", "from": "zone:ext",  "to": "sec:L0"},
+    {"type": "MAPS_TO", "from": "zone:user", "to": "sec:L1"},
+    {"type": "MAPS_TO", "from": "zone:dmz",  "to": "sec:L2"},
+    {"type": "MAPS_TO", "from": "zone:int",  "to": "sec:L3"},
+    {"type": "MAPS_TO", "from": "zone:pipe", "to": "sec:L2"},
+
+    {"type": "USES_MODEL", "from": "org:aoc-dev", "to": "model:opus"},
+    {"type": "USES_MODEL", "from": "org:aoc-lab", "to": "model:opus"},
+    {"type": "USES_MODEL", "from": "org:aoc-ops", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:ax-univ", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:ax-sec", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:ax-mkt", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:it-dc", "to": "model:gptoss"},
+    {"type": "USES_MODEL", "from": "org:ccc", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:it-support", "to": "model:haiku"},
+    {"type": "USES_MODEL", "from": "org:hr", "to": "model:openlocal"},
+    {"type": "USES_MODEL", "from": "org:fin", "to": "model:openlocal"},
+    {"type": "USES_MODEL", "from": "org:ga", "to": "model:haiku"},
+    {"type": "USES_MODEL", "from": "org:biz-support", "to": "model:haiku"},
+
+    {"type": "OPERATES_AT", "from": "org:aoc-dev", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:aoc-lab", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:aoc-ops", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:ax-univ", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:ax-sec", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:ax-mkt", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:it-dc", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:ccc", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:it-support", "to": "auto:A2"},
+    {"type": "OPERATES_AT", "from": "org:hr", "to": "auto:A0"},
+    {"type": "OPERATES_AT", "from": "org:fin", "to": "auto:A0"},
+    {"type": "OPERATES_AT", "from": "org:ga", "to": "auto:A1"},
+    {"type": "OPERATES_AT", "from": "org:biz-support", "to": "auto:A1"}
+  ]
+}

@@ -7,3 +7,4 @@ businesses: [aoc-platform]
 teams: [itops-datacenter, itops-support, itops-ccc, itops-bizsupport]
 zone: int
 autonomy_default: A1
+eg_org: org:it          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

@@ -7,3 +7,4 @@ businesses: [aoc-platform, ax-consulting]
 teams: [corp-hr, corp-finance, corp-admin, corp-marketing, corp-sales, corp-cs, corp-secretary]
 zone: user
 autonomy_default: A1
+eg_org: org:mgmt          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

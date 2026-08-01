@@ -8,3 +8,4 @@ work_domains: [consulting]
 zone: dmz
 escalation_to: null
 references: [docs/references/ax-university]
+eg_org: org:ax-univ          # EG OrgUnit 매핑 (make eg-bridge 가 검증)

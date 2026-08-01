@@ -8,3 +8,4 @@ work_domains: [corporate]
 zone: user
 max_sensitivity: L2
 escalation_to: null
+eg_org: org:mgmt        # EG 미분화 — 상위 경영관리부에 귀속 (분화 시 갱신)
