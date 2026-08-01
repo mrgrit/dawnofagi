@@ -1,0 +1,10 @@
+id: corp-marketing
+division: corp
+name: 마케팅팀
+mission: 자사 마케팅·콘텐츠.
+persona_default: corporate
+agents: []
+work_domains: [corporate]
+zone: user
+max_sensitivity: L1
+escalation_to: null

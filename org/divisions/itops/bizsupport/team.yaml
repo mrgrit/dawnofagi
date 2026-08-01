@@ -1,0 +1,9 @@
+id: itops-bizsupport
+division: itops
+name: 사업지원팀
+mission: 사업 수행에 필요한 기술 지원·환경 구축.
+persona_default: secops
+agents: []
+work_domains: [operations]
+zone: int
+escalation_to: itops-ccc

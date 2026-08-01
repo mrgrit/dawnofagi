@@ -1,0 +1,22 @@
+# 사업: AX 컨설팅
+id: ax-consulting
+name: AX 컨설팅 사업
+name_en: AX Consulting Business
+status: active
+mission: AI 전환(AX) 컨설팅부터 플랫폼 구축·유지보수까지 일괄 제공한다. 대학 → 보안 → 마케팅 순으로 확장한다.
+revenue_model: [consulting, platform_build, maintenance, managed_service]
+owning_divisions: [ax]
+target_segments: [university, security, marketing]
+tenant_model: multi
+data_sensitivity: L2
+roadmap:
+  - {phase: "자사 AX",   goal: "자사를 먼저 AX 하여 방법론 검증",        status: in_progress}
+  - {phase: "대학 AX",   goal: "전공별 X+AI 커리큘럼·시뮬레이터 공급",   status: planned}
+  - {phase: "보안 AX",   goal: "tw2 자산 기반 보안 산업 AX",             status: planned}
+  - {phase: "마케팅 AX", goal: "마케팅 도메인 AX",                       status: planned}
+kpis:
+  - {name: 프로젝트 성공률,     target: 90, unit: percent, direction: up}
+  - {name: 산출물 할루시네이션율, target: 2,  unit: percent, direction: down}
+notes: |
+  대학 AX 참조 산출물(전공별 AI 접목 방향, X+AI 발표자료, 물류/조리 시뮬레이터 데모)은
+  docs/references/ax-university/ 에 색인되어 있다.

@@ -1,0 +1,11 @@
+id: itops-ccc
+division: itops
+name: CCC부
+mission: 자사 사이버보안 관제. AOC본부의 방법론 검증장이자 첫 고객.
+persona_default: secops
+agents: [ccc-soc-triage-01]
+work_domains: [security, operations]
+zone: dmz
+escalation_to: null
+# 운영 안정화 후 6팀(SOC·CTI·분석대응·오펜시브·보안운영·보안교육사업)으로 분화 예정.
+subteams_planned: [soc, cti, analysis-response, offensive, secops, security-education]

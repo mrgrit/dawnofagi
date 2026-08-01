@@ -1,0 +1,59 @@
+# gitleaks 설정 — 05_conventions #1 "시크릿 하드코딩 금지" 의 기계적 강제.
+# pre-commit 훅과 CI 가 같은 설정을 쓴다.
+#
+# 문법 주의: 룰별 allowlist 는 `[rules.allowlist]`(매핑) — `[[rules.allowlist]]`(배열)가 아니다.
+# 잘못 쓰면 gitleaks 가 설정 로드에 실패하고, 훅은 "실패=차단"으로 동작해
+# 모든 커밋이 막히면서 **스캔이 실제로 도는 것처럼 보인다.** 반드시 `make secrets` 로 확인하라.
+
+title = "the dawn of AGI — secret scan"
+
+[extend]
+useDefault = true          # gitleaks 기본 규칙(AWS·GCP·Slack·Stripe 등) 전부 사용
+
+# ── 이 회사가 추가로 잡아야 하는 것 ─────────────────────────────────────
+
+[[rules]]
+id = "el34-api-key"
+description = "el34 Assessor X-API-Key"
+regex = '''(?i)(el34[_-]?api[_-]?key|x-api-key)\s*[:=]\s*['"]?([a-zA-Z0-9._\-]{8,})['"]?'''
+tags = ["el34", "apikey"]
+  [rules.allowlist]
+  regexTarget = "line"
+  regexes = [
+    '''(?i)(el34[_-]?api[_-]?key|x-api-key)\s*[:=]\s*['"]?(\$\{?[A-Z_]+\}?|<[^>]*>|x{3,}|redacted|changeme|your[_-]?key)?['"]?\s*$''',
+  ]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''sk-ant-[a-zA-Z0-9\-_]{20,}'''
+tags = ["anthropic", "apikey"]
+
+[[rules]]
+id = "github-pat-strict"
+description = "GitHub personal access token"
+regex = '''\bgh[pousr]_[A-Za-z0-9]{36,}\b'''
+tags = ["github", "token"]
+
+[[rules]]
+id = "generic-password-assignment"
+description = "코드에 박힌 비밀번호"
+regex = '''(?i)\b(password|passwd|secret|api[_-]?token)\s*[:=]\s*['"][^'"\s${<]{8,}['"]'''
+tags = ["generic"]
+  [rules.allowlist]
+  regexTarget = "line"
+  regexes = [
+    '''(?i)(password|passwd|secret|api[_-]?token)\s*[:=]\s*['"](\$\{?[A-Z_]+\}?|<[^>]*>|example|changeme|placeholder|redacted|\*+|x{3,})['"]''',
+  ]
+
+# ── 전역 allowlist ──────────────────────────────────────────────────────
+[allowlist]
+description = "템플릿·참조 문서·원본 지시서"
+paths = [
+  '''\.env\.example$''',
+  '''(^|/)docs/''',
+  '''(^|/)initial/''',
+  '''\.gitleaks\.toml$''',
+  '''(^|/)tests?/fixtures/''',
+  '''(^|/)bin/''',
+]

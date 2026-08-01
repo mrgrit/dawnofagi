@@ -1,0 +1,33 @@
+# 경리총무팀 — L3 재무 데이터 취급. 클라우드 모델 금지, 외부 경로 전면 차단.
+tools:
+  allow:
+    - eg.*
+    - skill.*
+    - fs.read
+    - fs.write
+    - fin.ledger_read
+    - fin.expense_read
+    - fin.expense_write
+  deny:
+    - fin.ledger_write      # 원장 기입은 사람 승인 후 별도 경로
+    - sys.*                 # 셸·배포 없음
+    - sec.*                 # 관제 도구 없음
+    - net.*                 # 웹 검색 금지 — L3 유출 경로 차단
+    - comm.*                # 외부 발송 금지
+    - hr.*                  # 급여는 인사팀 권한
+    - dev.*
+autonomy: A1
+hitl:
+  require_on:
+    - destructive
+    - irreversible
+    - l3_data
+    - payment
+    - amount_over_threshold
+  amount_threshold_krw: 100000
+budget:
+  max_steps: 25
+  max_tool_calls: 40
+model:
+  policy: local_only              # pol:l3-local-only — 강제
+  force_local_when: [always]

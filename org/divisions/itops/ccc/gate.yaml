@@ -1,0 +1,30 @@
+# CCC부 — 관제팀. 조사 도구는 넓게, 변경 도구는 HITL, 업무데이터는 차단.
+tools:
+  allow:
+    - eg.*
+    - skill.*
+    - fs.read
+    - fs.write
+    - net.fetch
+    - sec.*
+    - sys.run_command
+  deny:
+    - fin.*                 # 관제는 재무 데이터에 접근하지 않는다
+    - hr.*                  # 인사 데이터도
+    - comm.*
+    - dev.dependency_add
+    - fs.delete
+autonomy: A1
+hitl:
+  require_on:
+    - destructive
+    - irreversible
+    - firewall_change
+    - container_stop
+    - credential_revoke
+    - isolate
+budget:
+  max_steps: 40
+  max_tool_calls: 80
+model:
+  policy: from_eg

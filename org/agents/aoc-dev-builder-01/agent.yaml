@@ -1,0 +1,12 @@
+id: aoc-dev-builder-01
+team: aoc-dev
+name: AOC 구현 에이전트 #1
+role: worker
+persona: aoc-dev
+works: [engineering/feature-build]
+autonomy: A1
+model_hint: opus
+tools: [eg.search, eg.record, skill.preview, skill.run, fs.read, fs.write, sys.run_command, dev.git, dev.tests, net.web_search]
+status: active
+zone: dmz
+telemetry: {emit: true, service_name: dawn.agent.aoc-dev-builder-01}

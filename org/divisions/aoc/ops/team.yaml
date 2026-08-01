@@ -1,0 +1,9 @@
+id: aoc-ops
+division: aoc
+name: 운영부
+mission: 고객 테넌트의 관제 운영과 유지보수를 책임진다. 관제 전문가 상주 서비스.
+persona_default: secops
+agents: []
+work_domains: [operations]
+zone: dmz
+escalation_to: aoc-lab

@@ -1,0 +1,9 @@
+id: corp
+name: 경영관리부
+name_en: Corporate Division
+mission: 코퍼레이트 기능. 정형·반복 업무가 많아 자동화 1순위.
+color: "#3B82F6"          # 파랑
+businesses: [aoc-platform, ax-consulting]
+teams: [corp-hr, corp-finance, corp-admin, corp-marketing, corp-sales, corp-cs, corp-secretary]
+zone: user
+autonomy_default: A1

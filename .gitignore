@@ -1,0 +1,51 @@
+# ── secrets (05_conventions.md #1: 시크릿 하드코딩 금지) ──────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/keys/.gitkeep
+secrets/
+*.token
+.credentials
+
+# ── python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+dist/
+build/
+
+# ── node ────────────────────────────────────────────────────────────
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# ── EG / runtime data ───────────────────────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+!eg/seed/**/*.json
+eg/snapshots/*.json
+!eg/snapshots/.gitkeep
+var/
+logs/
+*.log
+
+# ── tooling ─────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+bin/gitleaks
+.control-plane-cache/
+
+# Claude Code 개인 설정
+.claude/settings.local.json

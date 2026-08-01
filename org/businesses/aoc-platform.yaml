@@ -1,0 +1,20 @@
+# 사업: AOC 플랫폼
+id: aoc-platform
+name: AOC 플랫폼 사업
+name_en: AOC Platform Business
+status: active
+mission: 에이전트 관제 플랫폼을 개발·판매하고, 고객 맞춤 커스터마이징과 관제 전문가 상주로 운영을 책임진다.
+revenue_model: [platform_license, customization, staffing, maintenance]
+owning_divisions: [aoc, itops]
+target_segments: [enterprise, public, university]
+tenant_model: multi
+data_sensitivity: L2
+roadmap:
+  - {phase: "테넌트 #0 (자사)", goal: "자사 에이전트를 AOC로 관제", status: in_progress}
+  - {phase: "레퍼런스 공개",     goal: "자사 운영 데이터를 살아있는 데모로",  status: planned}
+  - {phase: "외부 판매",         goal: "첫 고객 테넌트 온보딩",              status: planned}
+kpis:
+  - {name: HITL 개입률,   target: 10,  unit: percent, direction: down}
+  - {name: 오탐율,        target: 5,   unit: percent, direction: down}
+  - {name: MTTD,          target: 300, unit: seconds, direction: down}
+  - {name: MTTR,          target: 1800, unit: seconds, direction: down}

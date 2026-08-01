@@ -1,0 +1,9 @@
+id: itops-datacenter
+division: itops
+name: 데이터센터운영팀
+mission: el34 인프라(컨테이너·네트워크·스토리지) 운영.
+persona_default: secops
+agents: []
+work_domains: [operations]
+zone: int
+escalation_to: itops-ccc

@@ -1,0 +1,23 @@
+# 사업: 독자모델 개발 (편입 예정 — 조직 설계는 미리 검증한다)
+id: foundation-model
+name: 독자모델 개발 사업
+name_en: Foundation / Domain Model Development
+status: planned
+mission: 자체 파운데이션·도메인 특화 모델을 개발하여 자사 에이전트와 고객 테넌트에 공급한다.
+revenue_model: [model_dev, research_grant, platform_license, maintenance]
+owning_divisions: [aoc]
+target_segments: [enterprise, public, university, security]
+tenant_model: multi
+data_sensitivity: L3       # 학습 데이터에 민감정보 포함 가능 → 로컬 처리 강제
+roadmap:
+  - {phase: "데이터·평가 파이프라인", goal: "학습 데이터 수집·정제·평가 하네스 구축", status: planned}
+  - {phase: "도메인 파인튜닝",        goal: "보안·관제 도메인 특화 모델",             status: planned}
+  - {phase: "자사 배치",              goal: "AOC 판정 모델을 자사 모델로 교체",       status: planned}
+  - {phase: "외부 공급",              goal: "고객 테넌트에 모델 공급",                status: planned}
+kpis:
+  - {name: 도메인 벤치 점수, target: 0,  unit: score,   direction: up}
+  - {name: 추론 단가,        target: 0,  unit: krw_per_1k_tokens, direction: down}
+notes: |
+  이 사업은 status:planned 이지만 매니페스트로 미리 등록해 둔다.
+  덕분에 조직·게이트·EG 설계가 사업 개시 전에 검증된다 (COMPANY.md §4-4 "사업은 플러그인").
+  판정 모델은 피감시 모델과 분리해야 한다(담합 방지) — 자사 모델을 AOC judge 로 쓸 때 특히 주의.

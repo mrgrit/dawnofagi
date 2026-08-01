@@ -1,0 +1,30 @@
+# ruff — lint + format. CI 와 pre-commit 이 같은 설정을 쓴다.
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "var", "bin", "initial", "node_modules"]
+
+[lint]
+select = [
+  "E", "W",    # pycodestyle
+  "F",         # pyflakes
+  "I",         # isort — 임포트 순서
+  "B",         # bugbear — 흔한 함정
+  "UP",        # pyupgrade
+  "C4",        # comprehensions
+  "SIM",       # 단순화
+  "RUF",       # ruff 고유 규칙
+]
+ignore = [
+  "E501",      # 줄 길이는 formatter 가 본다
+  "RUF001",    # 한글 문서·주석의 전각 문자 오탐
+  "RUF002",
+  "RUF003",
+  "SIM108",    # 삼항 강요 — 주석 붙은 if/else 가 더 읽힌다
+]
+
+[lint.per-file-ignores]
+"**/tests/*" = ["S101"]      # 테스트의 assert 는 정상
+
+[format]
+quote-style = "double"
+indent-style = "space"

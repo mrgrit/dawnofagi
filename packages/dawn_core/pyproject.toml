@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dawn-core"
+version = "0.1.0"
+description = "the dawn of AGI — 조직·사업 레지스트리와 에이전트 통제 평면 (COMPANY/AGENT_TEAM/WORK/SOUL)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "PyYAML>=6.0",       # MIT — 매니페스트 파싱
+  "jsonschema>=4.17",  # MIT — 매니페스트 스키마 검증
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+dawn = "dawn_core.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dawn_core*"]
+
+[tool.setuptools.package-data]
+dawn_core = ["schemas/*.json"]

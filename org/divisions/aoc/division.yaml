@@ -1,0 +1,9 @@
+id: aoc
+name: AOC본부
+name_en: AOC Division
+mission: 에이전트 관제(AOC) 서비스를 개발한다. 자사에 먼저 적용해 검증한 뒤 판매한다.
+color: "#2AB7A9"          # 청록
+businesses: [aoc-platform, foundation-model]
+teams: [aoc-dev, aoc-ops, aoc-lab]
+zone: dmz
+autonomy_default: A1

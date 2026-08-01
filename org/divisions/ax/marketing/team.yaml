@@ -1,0 +1,9 @@
+id: ax-marketing
+division: ax
+name: 마케팅사업부
+mission: 마케팅 도메인의 AI 전환.
+persona_default: consulting
+agents: []
+work_domains: [consulting]
+zone: dmz
+escalation_to: null

@@ -1,0 +1,9 @@
+id: aoc-lab
+division: aoc
+name: 연구소
+mission: 관제 방법론·탐지 기법·평가(judge) 연구. 독자모델 개발 사업의 R&D 축.
+persona_default: aoc-dev
+agents: []
+work_domains: [research, engineering]
+zone: dmz
+escalation_to: null

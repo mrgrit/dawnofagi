@@ -1,0 +1,10 @@
+id: corp-admin
+division: corp
+name: 경리총무팀
+mission: 경비·자산·정형 회계·총무. 자동화 1순위이나 게이트는 엄격.
+persona_default: corporate
+agents: [corp-admin-clerk-01]
+work_domains: [corporate]
+zone: user
+max_sensitivity: L3
+escalation_to: null

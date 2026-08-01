@@ -1,0 +1,10 @@
+id: corp-secretary
+division: corp
+name: 비서팀
+mission: 일정·회의·문서 조율.
+persona_default: corporate
+agents: []
+work_domains: [corporate]
+zone: user
+max_sensitivity: L2
+escalation_to: null

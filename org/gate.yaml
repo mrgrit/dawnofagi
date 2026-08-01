@@ -1,0 +1,45 @@
+# 전사 기본 게이트 (L1). 하위 gate 는 이것을 좁힐 수만 있다.
+# 병합: allow=교집합(패턴 포함관계), deny=합집합, 예산=최솟값, autonomy=더 낮은 쪽.
+# 도구 이름 규칙과 전체 목록: org/tools.yaml
+tools:
+  # 전사 허용 "우주" — 네임스페이스 단위로 넓게 잡고, 좁히는 것은 본부·팀의 몫.
+  allow:
+    - eg.*
+    - skill.*
+    - fs.read
+    - fs.write
+    - net.*
+    - sec.*
+    - sys.run_command
+    - dev.*
+    - fin.*
+    - hr.*
+  # 아무도, 어느 계층에서도 풀 수 없는 금지 (COMPANY.md §6.3)
+  deny:
+    - ctl.*                 # 통제 평면·킬 스위치 — 에이전트는 자기를 감시하는 층을 못 건드린다
+    - pay.*                 # 지급·결제 — 사람 전용
+    - sys.rm_rf_root
+    - sys.mkfs
+autonomy: A1                # 헌장 기본값
+hitl:
+  require_on:
+    - destructive
+    - irreversible
+    - l3_data
+    - external_send
+    - payment
+    - firewall_change
+    - deploy
+    - dependency_add
+budget:
+  max_steps: 60
+  max_tokens: 400000
+  max_tool_calls: 120
+  max_wallclock_sec: 1800
+model:
+  policy: from_eg                 # EG ModelPolicy 노드를 조회해 결정
+  force_local_when: [l3_data]     # pol:l3-local-only
+telemetry:
+  emit: true
+  otel_semconv: gen_ai            # OTel GenAI semantic conventions (버전 pin 필수)
+  capture_content: masked         # PII 마스킹 전제 opt-in

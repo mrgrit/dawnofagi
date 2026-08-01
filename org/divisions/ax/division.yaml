@@ -1,0 +1,9 @@
+id: ax
+name: AX본부
+name_en: AX Division
+mission: AI 전환 사업. 자사를 먼저 AX 한 뒤 고객에게 서비스한다.
+color: "#8B5CF6"          # 보라
+businesses: [ax-consulting]
+teams: [ax-university, ax-security, ax-marketing]
+zone: dmz
+autonomy_default: A1

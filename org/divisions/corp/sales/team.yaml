@@ -1,0 +1,10 @@
+id: corp-sales
+division: corp
+name: 영업팀
+mission: 영업·제안·계약. 계약·금액은 HITL.
+persona_default: corporate
+agents: []
+work_domains: [corporate]
+zone: user
+max_sensitivity: L2
+escalation_to: null

@@ -1,0 +1,10 @@
+id: corp-hr
+division: corp
+name: 인사팀
+mission: 인사·채용·평가. 개인정보(L3) 취급 — 로컬 모델 전용.
+persona_default: corporate
+agents: []
+work_domains: [corporate]
+zone: user
+max_sensitivity: L3
+escalation_to: null

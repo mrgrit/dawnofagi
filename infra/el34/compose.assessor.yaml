@@ -1,0 +1,17 @@
+# el34 Assessor 기동 오버라이드 — the dawn of AGI 쪽에서 관리한다.
+#
+# 왜 필요한가:
+#   el34 의 docker-compose.yaml 은 assessor 호스트 포트를 `192.168.0.151:9201` 로
+#   고정 바인딩한다. 그 IP 가 없는 호스트에서는 기동이 실패한다.
+#   우리는 dmz 브리지(10.20.32.55:8000)로 직접 접근하므로 호스트 포트 발행이 필요 없다.
+#
+# 사용 (el34 저장소는 건드리지 않는다):
+#   cd ~/el34 && docker compose \
+#       -f docker-compose.yaml \
+#       -f ~/dawnofagi/infra/el34/compose.assessor.yaml \
+#       --profile assessor up -d assessor
+#
+#   → 또는 그냥  make el34-assessor-up
+services:
+  assessor:
+    ports: !reset []          # 호스트 포트 발행 안 함 (dmz 브리지로 접근)

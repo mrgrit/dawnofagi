@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gate — org/**/gate.yaml (도구·자율화·예산 경계)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "autonomy": { "enum": ["A0", "A1", "A2", "A3"] },
+    "hitl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "require_on": { "type": "array", "items": { "type": "string" } },
+        "amount_threshold_krw": { "type": "number", "minimum": 0 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": { "type": "integer", "minimum": 1 },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "max_tool_calls": { "type": "integer", "minimum": 1 },
+        "max_wallclock_sec": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": { "enum": ["from_eg", "local_only", "cloud_ok", "pinned"] },
+        "pinned": { "type": "string" },
+        "force_local_when": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "emit": { "type": "boolean" },
+        "otel_semconv": { "type": "string" },
+        "capture_content": { "enum": ["none", "masked", "full"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+id: corp-finance
+division: corp
+name: 재무팀
+mission: 자금·예산·재무보고. 금액 임계 초과 시 HITL 필수.
+persona_default: corporate
+agents: []
+work_domains: [corporate]
+zone: user
+max_sensitivity: L3
+escalation_to: null

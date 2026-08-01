@@ -1,0 +1,12 @@
+id: ccc-soc-triage-01
+team: itops-ccc
+name: SOC 트리아지 에이전트 #1
+role: worker
+persona: secops
+works: [security/alert-triage, security/incident-investigation]
+autonomy: A1
+model_hint: sonnet          # 실제 결정은 EG ModelPolicy 조회 (gate.model.policy=from_eg)
+tools: [eg.search, eg.record, skill.preview, skill.run, fs.read, fs.write, sec.siem_query, sec.suricata_query, sec.waf_query, sec.trace_query, sec.docker_inspect]
+status: active
+zone: dmz
+telemetry: {emit: true, service_name: dawn.agent.ccc-soc-triage-01}

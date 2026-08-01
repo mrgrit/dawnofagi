@@ -1,0 +1,9 @@
+id: itops-support
+division: itops
+name: IT지원팀
+mission: 사내 IT 지원·엔드포인트 관리.
+persona_default: secops
+agents: []
+work_domains: [operations]
+zone: user
+escalation_to: itops-ccc

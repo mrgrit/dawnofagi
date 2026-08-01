@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 시크릿 스캔 — 05_conventions #1. 다른 잡보다 먼저 실패해야 한다 ──
+  secrets:
+    name: 시크릿 스캔
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 히스토리 전체 스캔
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  # ── lint + test + 통제 평면 ─────────────────────────────────────────
+  check:
+    name: lint · test · 통제 평면
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "packages/dawn_core[dev]"
+
+      - name: lint (ruff)
+        run: ruff check packages infra scripts
+
+      - name: format check (ruff)
+        run: ruff format --check packages infra
+
+      - name: 레지스트리 정합성
+        run: python -m dawn_core.cli registry --tree
+
+      - name: 통제 평면 컴파일 (전 에이전트)
+        run: python -m dawn_core.cli compile --all
+
+      - name: Control Readiness Score
+        run: python -m dawn_core.cli lint
+
+      - name: test (pytest)
+        run: pytest packages -q
+
+  # ── 배포 가능성: fresh Linux 원샷 설치가 실제로 되는가 ──────────────
+  bootstrap:
+    name: fresh Linux 부트스트랩
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bootstrap.sh --no-el34 --no-sudo
+        run: ./bootstrap.sh --no-el34 --no-sudo
+      - name: 설치 결과 검증
+        run: ./scripts/verify-p0.sh --no-el34

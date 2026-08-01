@@ -1,0 +1,82 @@
+# 도구 카탈로그 — 회사가 아는 모든 도구의 권위 목록.
+#
+# 도구 이름은 `<namespace>.<action>` 규칙을 따른다.
+# gate.yaml 의 allow/deny 는 정확한 이름 또는 글롭(`sec.*`)을 쓸 수 있다.
+# 여기 없는 도구를 매니페스트가 선언하면 `make registry` 가 실패한다.
+#
+# risk        LOW | MED | HIGH   — skill_preview 의 기본 위험도
+# destructive true 면 비가역 → 항상 HITL (COMPANY.md §6.3)
+
+namespaces:
+  eg:    { name: Experience Graph,  desc: "회사의 뇌 조회·축적" }
+  skill: { name: Skill 실행,        desc: "미리보기·실행 게이트" }
+  fs:    { name: 파일,              desc: "저장소·산출물 읽기·쓰기" }
+  net:   { name: 네트워크,          desc: "웹 검색·외부 조회" }
+  sec:   { name: 보안 관제,         desc: "SIEM·IPS·WAF·컨테이너 조사" }
+  sys:   { name: 시스템,            desc: "셸·컨테이너 조작" }
+  dev:   { name: 개발,              desc: "git·테스트·빌드" }
+  fin:   { name: 재무,              desc: "원장·경비 (L3)" }
+  hr:    { name: 인사,              desc: "인사·급여 (L3)" }
+  comm:  { name: 외부 통신,         desc: "메일·API 발송" }
+  pay:   { name: 지급,              desc: "결제·이체 (비가역)" }
+  ctl:   { name: 통제 평면,         desc: "킬 스위치·게이트 자체 — 에이전트는 영구 차단" }
+
+tools:
+  # ── eg ──────────────────────────────────────────────────────────────
+  eg.search:            { risk: LOW,  destructive: false, desc: "페르소나·정책·과거 경험 조회" }
+  eg.record:            { risk: LOW,  destructive: false, desc: "Task/Finding/Observation 축적" }
+
+  # ── skill ───────────────────────────────────────────────────────────
+  skill.preview:        { risk: LOW,  destructive: false, desc: "실행 전 위험도 확인" }
+  skill.run:            { risk: MED,  destructive: false, desc: "스킬 실행 (개별 위험도는 스킬별)" }
+
+  # ── fs ──────────────────────────────────────────────────────────────
+  fs.read:              { risk: LOW,  destructive: false, desc: "파일 읽기" }
+  fs.write:             { risk: MED,  destructive: false, desc: "파일 쓰기" }
+  fs.delete:            { risk: HIGH, destructive: true,  desc:""파일 삭제"" }
+
+  # ── net ─────────────────────────────────────────────────────────────
+  net.web_search:       { risk: LOW,  destructive: false, desc: "웹 검색 (L3 데이터 유출 경로 — 민감 팀은 deny)" }
+  net.fetch:            { risk: LOW,  destructive: false, desc: "URL 조회" }
+
+  # ── sec ─────────────────────────────────────────────────────────────
+  sec.siem_query:       { risk: LOW,  destructive: false, desc: "Wazuh SIEM 조회" }
+  sec.suricata_query:   { risk: LOW,  destructive: false, desc: "Suricata IPS 이벤트 조회" }
+  sec.waf_query:        { risk: LOW,  destructive: false, desc: "ModSecurity WAF 로그 조회" }
+  sec.trace_query:      { risk: LOW,  destructive: false, desc: "OTel 스팬·트레이스 레이크 조회" }
+  sec.docker_inspect:   { risk: MED,  destructive: false, desc: "컨테이너 상태 조사 (읽기)" }
+  sec.container_stop:   { risk: HIGH, destructive: true,  desc:""컨테이너 중단 — HITL"" }
+  sec.firewall_change:  { risk: HIGH, destructive: true,  desc:""방화벽·IPS 룰 변경 — HITL"" }
+  sec.credential_revoke: { risk: HIGH, destructive: true,  desc:""자격증명 회수 — HITL"" }
+  sec.isolate:          { risk: HIGH, destructive: true,  desc:""샌드박스 격리 — HITL"" }
+
+  # ── sys ─────────────────────────────────────────────────────────────
+  sys.run_command:      { risk: MED,  destructive: false, desc: "셸 명령 (읽기 위주. 상태 변경은 스킬 게이트)" }
+  sys.deploy:           { risk: HIGH, destructive: true,  desc:""배포 — HITL"" }
+  sys.rm_rf_root:       { risk: HIGH, destructive: true,  desc:""파괴적 삭제 — 전사 영구 금지"" }
+  sys.mkfs:             { risk: HIGH, destructive: true,  desc:""파일시스템 포맷 — 전사 영구 금지"" }
+
+  # ── dev ─────────────────────────────────────────────────────────────
+  dev.git:              { risk: MED,  destructive: false, desc: "git 조작 (push 는 별도 게이트)" }
+  dev.tests:            { risk: LOW,  destructive: false, desc: "테스트 실행" }
+  dev.dependency_add:   { risk: HIGH, destructive: false, desc:""새 외부 의존성 추가 — HITL (공급망·라이선스)"" }
+
+  # ── fin (L3) ────────────────────────────────────────────────────────
+  fin.ledger_read:      { risk: MED,  destructive: false, desc: "원장 조회 (L3)" }
+  fin.ledger_write:     { risk: HIGH, destructive: true,  desc:""원장 기입 — append-only, HITL (L3)"" }
+  fin.expense_read:     { risk: MED,  destructive: false, desc: "경비 조회 (L3)" }
+  fin.expense_write:    { risk: MED,  destructive: false, desc: "경비 전표 초안 작성 (L3)" }
+
+  # ── hr (L3) ─────────────────────────────────────────────────────────
+  hr.data_read:         { risk: HIGH, destructive: false, desc:""인사·급여 데이터 조회 (L3, 로컬 전용)"" }
+
+  # ── comm ────────────────────────────────────────────────────────────
+  comm.external_send:   { risk: HIGH, destructive: true,  desc:""외부 발송(메일·API) — 비가역, HITL"" }
+
+  # ── pay ─────────────────────────────────────────────────────────────
+  pay.execute:          { risk: HIGH, destructive: true,  desc:""지급·결제 실행 — 비가역, 사람 전용"" }
+
+  # ── ctl (에이전트 영구 차단) ────────────────────────────────────────
+  ctl.modify_gate:      { risk: HIGH, destructive: true,  desc:""게이트 수정 — 에이전트 금지"" }
+  ctl.modify_kill_switch: { risk: HIGH, destructive: true, desc:""킬 스위치 수정 — 에이전트 금지"" }
+  ctl.cross_tenant:     { risk: HIGH, destructive: true,  desc:""크로스테넌트 접근 — 영구 금지"" }

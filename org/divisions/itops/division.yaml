@@ -1,0 +1,9 @@
+id: itops
+name: IT운영본부
+name_en: IT Operations Division
+mission: 인프라·보안 운영. el34 를 유지하고, AOC 방법론의 검증장 역할을 한다.
+color: "#F59E0B"          # 주황
+businesses: [aoc-platform]
+teams: [itops-datacenter, itops-support, itops-ccc, itops-bizsupport]
+zone: int
+autonomy_default: A1

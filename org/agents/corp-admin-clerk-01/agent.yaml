@@ -1,0 +1,12 @@
+id: corp-admin-clerk-01
+team: corp-admin
+name: 경리 처리 에이전트 #1
+role: worker
+persona: corporate
+works: [corporate/expense-processing]
+autonomy: A1
+model_hint: local           # L3 — 로컬 강제 (gate.model.policy=local_only)
+tools: [eg.search, eg.record, skill.preview, skill.run, fs.read, fs.write, fin.ledger_read, fin.expense_read, fin.expense_write]
+status: active
+zone: user
+telemetry: {emit: true, service_name: dawn.agent.corp-admin-clerk-01}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Business manifest — org/businesses/*.yaml",
+  "type": "object",
+  "required": ["id", "name", "status", "mission", "revenue_model", "owning_divisions"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "name_en": { "type": "string" },
+    "status": { "enum": ["active", "planned", "paused", "retired"] },
+    "mission": { "type": "string", "minLength": 5 },
+    "revenue_model": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "string", "pattern": "^[a-z0-9_]+$" }
+    },
+    "owning_divisions": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" }
+    },
+    "target_segments": { "type": "array", "items": { "type": "string" } },
+    "tenant_model": { "enum": ["single", "multi"] },
+    "data_sensitivity": { "enum": ["L0", "L1", "L2", "L3"] },
+    "roadmap": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "goal", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "phase": { "type": "string" },
+          "goal": { "type": "string" },
+          "status": { "enum": ["done", "in_progress", "planned", "blocked"] }
+        }
+      }
+    },
+    "kpis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "target", "unit"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "target": { "type": "number" },
+          "unit": { "type": "string" },
+          "direction": { "enum": ["up", "down"] }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}
