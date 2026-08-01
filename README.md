@@ -150,6 +150,8 @@ apps/pixel-office/index.html  픽셀 오피스 관제 콘솔 (파일 1개, 의�
 apps/groupware/               공개 홈페이지 + 사내 그룹웨어              (P4)
   dawn_groupware/               인증·조직권한 · 승인 관문 · EG 조정 UI · 감사
 apps/website/                 공개 홈페이지 정적 자산                    (P4)
+biz/                          업무 시스템 — 문서·CRM·프로젝트·경리        (P5)
+  dawn_biz/                     업무 DB · EG 자산 대조 · 업무 스킬 · 업무 에이전트
 infra/                        배포 · el34 연동
 docs/
   START_HERE.md                 구축 순서 P0→P6
@@ -191,7 +193,7 @@ make health                # 도달성 + 인증 확인
 | **P2** | 에이전트 하네스·루프·행동 게이트 | ✅ 완료 |
 | **P3** | AOC 관제 시스템 · 픽셀 오피스 | ✅ 완료 |
 | **P4** | 홈페이지 · 그룹웨어 | ✅ 완료 |
-| P5 | 업무 시스템 (CRM·문서·프로젝트·경리) | ⬜ |
+| **P5** | 업무 시스템 (문서·CRM·프로젝트·경리) | ✅ 완료 |
 | P6 | 통합 · 레드팀 검증 · 자사 운영 개시 | ⬜ |
 
 각 단계의 DoD와 자기검증 결과는 [`BUILD_LOG.md`](BUILD_LOG.md).
@@ -203,7 +205,7 @@ make health                # 도달성 + 인증 확인
 ```bash
 make help            # 전체 목록
 make check           # lint · test · registry · compile · control-lint · eg-validate · eg-bridge
-make verify          # P0~P4 자기검증 (DoD + 개입·게이트·관제·그룹웨어 실증)
+make verify          # P0~P5 자기검증 (DoD + 개입·게이트·관제·그룹웨어·업무 실증)
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
 
@@ -229,6 +231,15 @@ make portal-users                       # 계정 목록
 make portal-caps                        # 능력(권한) 카탈로그
 make portal-audit A=hitl.               # 감사 로그
 make inquiries                          # 홈페이지 문의 접수함
+
+make biz-seed                           # 업무 데모 데이터 (레지스트리에서 파생)
+make biz-crm                            # 고객·문의·계약
+make biz-proj KEY=AOC_PLATFORM          # 프로젝트·태스크 (의존 판정 포함)
+make biz-acct                           # 경비·자산 대장 (L3)
+make biz-docs Q="검색어"                 # 문서·지식 전문 검색
+make biz-egcheck                        # 업무 데이터 ↔ EG 자산 정합성
+make biz-run W=inquiry S=1              # 업무 에이전트 기동 (모델 호출)
+make biz-emit E=crm.inquiry.new DRY=1   # 업무 이벤트 → 훅
 ```
 
 ### 접속

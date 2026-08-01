@@ -28,16 +28,16 @@ hooks:  ## git 훅 재설치 (gitleaks 포함)
 # ══ 품질 ════════════════════════════════════════════════════════════════
 .PHONY: lint
 lint:  ## ruff lint
-	@$(PY) -m ruff check packages infra scripts eg agents aoc apps/groupware
+	@$(PY) -m ruff check packages infra scripts eg agents aoc apps/groupware biz
 
 .PHONY: fmt
 fmt:  ## ruff format (수정)
-	@$(PY) -m ruff format packages infra eg agents scripts aoc apps/groupware
-	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc apps/groupware
+	@$(PY) -m ruff format packages infra eg agents scripts aoc apps/groupware biz
+	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc apps/groupware biz
 
 .PHONY: test
 test:  ## pytest
-	@$(PY) -m pytest packages agents aoc apps/groupware -q
+	@$(PY) -m pytest packages agents aoc apps/groupware biz -q
 
 # ══ 레지스트리 · 통제 평면 ══════════════════════════════════════════════
 .PHONY: registry
@@ -234,10 +234,10 @@ portal:  ## 사내 그룹웨어 — http://<호스트 IP>:8811 (승인 큐·EG �
 .PHONY: web-bg
 web-bg:  ## 홈페이지 + 그룹웨어 백그라운드 기동 (SSH 끊겨도 산다)
 	@mkdir -p var/web
-	@pgrep -f "[d]awn_groupware.cli site" >/dev/null \
+	@pgrep -f "[d]awn.web site|[d]awn_groupware.cli site" >/dev/null \
 	  || (setsid nohup $(PY) -m dawn_groupware.cli site --port $${SITE_PORT:-8810} \
 	        --host 0.0.0.0 > var/web/site.log 2>&1 < /dev/null &)
-	@pgrep -f "[d]awn_groupware.cli portal" >/dev/null \
+	@pgrep -f "[d]awn.web portal|[d]awn_groupware.cli portal" >/dev/null \
 	  || (setsid nohup $(PY) -m dawn_groupware.cli portal --port $${PORTAL_PORT:-8811} \
 	        --host 0.0.0.0 --office-url "$${OFFICE_URL:-http://localhost:8800/}" \
 	        > var/web/portal.log 2>&1 < /dev/null &)
@@ -246,7 +246,7 @@ web-bg:  ## 홈페이지 + 그룹웨어 백그라운드 기동 (SSH 끊겨도 �
 
 .PHONY: web-stop
 web-stop:  ## 홈페이지·그룹웨어 중지
-	@pgrep -f "[d]awn_groupware.cli" | xargs -r kill 2>/dev/null \
+	@pgrep -f "[d]awn.web |[d]awn_groupware.cli" | xargs -r kill 2>/dev/null \
 	   && echo "중지됨" || echo "떠 있지 않다"
 
 .PHONY: portal-bootstrap
@@ -273,17 +273,56 @@ portal-audit:  ## 그룹웨어 감사 로그 — make portal-audit A=hitl.
 inquiries:  ## 홈페이지 문의 접수함
 	@$(PY) -m dawn_groupware.cli inquiries
 
+# ══ 업무 시스템 (P5) ═════════════════════════════════════════════════════
+.PHONY: biz-seed
+biz-seed:  ## 업무 데모 데이터 주입 (레지스트리에서 파생)
+	@$(PY) -m dawn_biz.cli seed $(if $(FORCE),--force,)
+
+.PHONY: biz-docs
+biz-docs:  ## 문서·지식 — make biz-docs Q="검색어"
+	@$(PY) -m dawn_biz.cli docs $(ID) $(if $(Q),--search "$(Q)",)
+
+.PHONY: biz-crm
+biz-crm:  ## 고객·문의·계약 — make biz-crm ID=<문의 id> 로 상세
+	@$(PY) -m dawn_biz.cli crm $(ID)
+
+.PHONY: biz-proj
+biz-proj:  ## 프로젝트·태스크 — make biz-proj KEY=AOC_PLATFORM
+	@$(PY) -m dawn_biz.cli proj $(KEY)
+
+.PHONY: biz-acct
+biz-acct:  ## 경비·자산 대장 (L3) — make biz-acct ID=<request-id>
+	@$(PY) -m dawn_biz.cli acct $(ID)
+
+.PHONY: biz-egcheck
+biz-egcheck:  ## 업무 데이터 ↔ EG 자산 정합성 (어긋나면 실패)
+	@$(PY) -m dawn_biz.cli egcheck
+
+.PHONY: biz-intake
+biz-intake:  ## 홈페이지 문의 접수함 → CRM 흡수 (한 방향)
+	@$(PY) -m dawn_biz.cli intake
+
+.PHONY: biz-run
+biz-run:  ## 업무 에이전트 기동 — make biz-run W=inquiry S=1 [APPROVE=1]
+	@test -n "$(W)" -a -n "$(S)" || { echo ' 사용법: make biz-run W=inquiry|expense|project S=<대상>'; exit 2; }
+	@$(PY) -m dawn_biz.cli run $(W) $(S) $(if $(APPROVE),--auto-approve,)
+
+.PHONY: biz-emit
+biz-emit:  ## 업무 이벤트 → 훅 기동 — make biz-emit E=crm.inquiry.new P='{"inquiry_id":1}'
+	@$(PY) -m dawn_biz.cli emit $(E) --payload '$(P)' $(if $(DRY),--dry-run,)
+
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
-check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 동일한 전체 검사
+check: lint test registry compile control-lint eg-validate eg-bridge biz-egcheck  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0~P4 자기검증 (DoD + 개입·게이트·관제·그룹웨어 실증)
+verify:  ## P0~P5 자기검증 (DoD + 개입·게이트·관제·그룹웨어·업무 실증)
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
 	@bash scripts/verify-p2.sh
 	@bash scripts/verify-p3.sh
 	@bash scripts/verify-p4.sh
+	@bash scripts/verify-p5.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔

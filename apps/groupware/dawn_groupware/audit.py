@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dawn_core import jsonl
+
 # 감사 로그에 절대 들어가면 안 되는 키 (값이 통째로 마스킹된다)
 _SECRET_KEYS = {"password", "passwd", "pw", "token", "secret", "api_key", "session"}
 
@@ -63,13 +65,7 @@ class AuditLog:
         if not self.path.is_file():
             return []
         out: list[dict[str, Any]] = []
-        for raw in self.path.read_text(encoding="utf-8").splitlines():
-            if not raw.strip():
-                continue
-            try:
-                rec = json.loads(raw)
-            except ValueError:
-                continue
+        for rec in jsonl.read(self.path):
             if action_prefix and not rec.get("action", "").startswith(action_prefix):
                 continue
             if actor and rec.get("actor") != actor:

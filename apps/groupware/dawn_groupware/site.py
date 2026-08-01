@@ -9,14 +9,13 @@
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dawn_core import jsonl
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
@@ -97,6 +96,28 @@ _recent: dict[str, list[float]] = {}
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _utf8(value: str) -> str:
+    """latin-1 로 잘못 디코딩된 UTF-8 을 되살린다.
+
+    브라우저는 폼 값을 퍼센트 인코딩해 보내므로 보통은 문제가 없다. 그런데
+    `curl -d` 같은 클라이언트가 **원문 UTF-8 바이트**를 그대로 보내면 ASGI 층이
+    latin-1 로 디코딩해 `김도입` 이 `ê¹€ë„ìž…` 이 된다.
+
+    되살릴 수 있을 때만 되살린다 — latin-1 로 다시 인코딩해서 UTF-8 로 디코딩이
+    되면 그건 깨진 것이고, 안 되면 원래 정상이던 값이다.
+
+    이걸 방치하면 한글 문의가 통째로 못 쓰게 되고, 깨진 바이트에 섞인 `\x85` 가
+    JSONL 을 쪼갠다 (dawn_core.jsonl 참조).
+    """
+    if value.isascii():
+        return value
+    try:
+        repaired = value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    return repaired
 
 
 def _footer() -> Safe:
@@ -298,7 +319,7 @@ def _contact_body(*, error: str = "", ok: bool = False,
 
 async def contact_post(request: Request) -> HTMLResponse:
     form_data = await request.form()
-    values = {k: str(form_data.get(k, ""))[:MAX_LEN.get(k, 200)]
+    values = {k: _utf8(str(form_data.get(k, "")))[:MAX_LEN.get(k, 200)]
               for k in ("name", "email", "org", "message")}
     ip = request.client.host if request.client else "-"
 
@@ -307,13 +328,7 @@ async def contact_post(request: Request) -> HTMLResponse:
         return _shell("문의", _contact_body(error=err, values=values), "/contact")
 
     path = Path(request.app.state.root) / "var" / "website" / "inquiries.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    rec = {"at": _now(), "ip": ip, **values}
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        os.write(fd, (json.dumps(rec, ensure_ascii=False) + "\n").encode("utf-8"))
-    finally:
-        os.close(fd)
+    jsonl.append(path, {"at": _now(), "ip": ip, **values})
     _recent.setdefault(ip, []).append(time.time())
     return _shell("문의", _contact_body(ok=True), "/contact")
 

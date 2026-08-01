@@ -10,6 +10,8 @@ tools:
     - dev.git
     - dev.tests
     - sec.trace_query       # 자기가 만든 관제를 조회해 검증
+    - doc.*                 # 설계·근거 문서 (P5)
+    - proj.*                # 프로젝트·태스크 조율 (P5)
   deny:
     - fin.*
     - hr.*

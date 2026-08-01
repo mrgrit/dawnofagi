@@ -169,9 +169,11 @@ fi
   || die "dawn-aoc 설치 실패"; }
 [[ -d apps/groupware ]] && { ./.venv/bin/python -m pip install -q -e "apps/groupware[dev]" \
   || die "dawn-web 설치 실패"; }
+[[ -d biz ]] && { ./.venv/bin/python -m pip install -q -e "biz[dev]" \
+  || die "dawn-biz 설치 실패"; }
 ok "설치: $(./.venv/bin/python - <<'PY'
 mods = []
-for name in ("dawn_core", "dawn_agents", "dawn_aoc", "dawn_groupware"):
+for name in ("dawn_core", "dawn_agents", "dawn_aoc", "dawn_groupware", "dawn_biz"):
     try:
         m = __import__(name)
         mods.append(f"{name.replace('_', '-')} {getattr(m, '__version__', '?')}")
@@ -259,6 +261,7 @@ cat <<EOF
     make web-bg               홈페이지(:8810) + 그룹웨어(:8811)
     make portal-bootstrap     그룹웨어 첫 관리자 계정 — 비밀번호가 1회만 출력된다
     make aoc                  관제 1회전 — 수집 → 탐지 → 트리아지
+    make biz-seed             업무 데모 데이터 (문서·CRM·프로젝트·경리)
 
   ${B}읽을 것${Z}
     COMPANY.md                            회사 헌법 (모든 에이전트에 주입됨)

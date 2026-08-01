@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from dawn_agents.hitl import ApprovalQueue
+from dawn_core import jsonl
 
 from .killswitch import KillSwitch
 from .triage import PLAYBOOKS, Case
@@ -155,8 +156,7 @@ class Responder:
     def history(self, limit: int = 50) -> list[dict[str, Any]]:
         if not self.log_path.is_file():
             return []
-        lines = self.log_path.read_text(encoding="utf-8").splitlines()
-        return [json.loads(x) for x in lines[-limit:] if x.strip()]
+        return jsonl.read(self.log_path, limit=limit)
 
 
 def _now() -> str:

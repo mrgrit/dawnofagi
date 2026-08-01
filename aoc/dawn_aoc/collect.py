@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from dawn_agents.telemetry import GEN_AI_SEMCONV_VERSION, mask_pii
+from dawn_core import jsonl
 
 # 수집 시점에 "이건 마스킹됐어야 한다"를 다시 확인하는 패턴.
 # P2 의 마스킹과 같은 대상이지만 독립적으로 판정한다 (이중 확인).
@@ -131,7 +132,7 @@ class TraceLake:
             return []
         return [
             json.loads(ln)
-            for ln in p.read_text(encoding="utf-8").splitlines()
+            for ln in jsonl.iter_lines(p.read_text(encoding="utf-8"))
             if ln.strip()
         ]
 

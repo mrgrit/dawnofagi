@@ -1,0 +1,13 @@
+id: corp-cs-crm-01
+team: corp-cs
+name: 고객문의 처리 에이전트 #1
+role: worker
+persona: corporate
+works: [corporate/crm-inquiry]
+autonomy: A1
+model_hint: cloud           # 고객 문의는 L2 — 클라우드 허용. 계약·금액은 게이트가 세운다
+tools: [eg.search, eg.record, skill.preview, skill.run, doc.search, doc.read,
+        crm.customer_read, crm.inquiry_read, crm.inquiry_draft, crm.contract_read]
+status: active
+zone: user
+telemetry: {emit: true, service_name: dawn.agent.corp-cs-crm-01}

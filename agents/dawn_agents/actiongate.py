@@ -28,9 +28,10 @@ from dawn_core.gate import AUTONOMY_ORDER, Gate
 from .policy import Facts, fired
 from .policy import evaluate as evaluate_policies
 
-# 스킬 위험도 → 행동의 비가역성 축. 심각도는 **행동** × 자산등급이지
-# 자산의 선언된 비가역성 × 자산등급이 아니다 — 읽기는 읽기다.
-ACTION_IRREVERSIBILITY = {"LOW": "read", "MED": "write", "HIGH": "execute"}
+# 행동의 비가역성은 **카탈로그가 선언한다** (`org/tools.yaml` 의 `action:`).
+# 심각도는 행동 × 자산등급이지 자산의 선언된 비가역성 × 자산등급이 아니다 —
+# 읽기는 읽기다. 폴백(위험도에서 추정)은 `skills.action_of` 에 있다.
+from .skills import RISK_TO_ACTION as ACTION_IRREVERSIBILITY  # noqa: F401  (하위호환)
 
 DECISIONS = ["log_only", "warn", "require_hitl", "block"]
 
@@ -159,11 +160,7 @@ class ActionGate:
 
         # ③ EG 순회 — 자산 → 등급 → 정책 (rule 을 실제로 판정한다)
         d.assets = list(preview.touches_assets)
-        action_irr = (
-            "irreversible"
-            if preview.destructive
-            else ACTION_IRREVERSIBILITY.get(preview.risk, "write")
-        )
+        action_irr = preview.action or "write"
         action_weight = IRREVERSIBILITY_WEIGHT[action_irr]
 
         if self.eg is not None and d.assets:

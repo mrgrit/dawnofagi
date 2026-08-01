@@ -1,0 +1,13 @@
+id: aoc-dev-pm-01
+team: aoc-dev
+name: 프로젝트 조율 에이전트 #1
+role: orchestrator          # 팀 오케스트레이터 — 자기가 산출물을 만들지 않는다
+persona: aoc-dev
+works: [engineering/project-coordination]
+autonomy: A1
+model_hint: cloud
+tools: [eg.search, eg.record, skill.preview, skill.run, proj.read, proj.task_write,
+        proj.close, doc.search, doc.read]
+status: active
+zone: dmz
+telemetry: {emit: true, service_name: dawn.agent.aoc-dev-pm-01}

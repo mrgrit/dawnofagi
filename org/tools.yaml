@@ -5,7 +5,10 @@
 # 여기 없는 도구를 매니페스트가 선언하면 `make registry` 가 실패한다.
 #
 # risk        LOW | MED | HIGH   — skill_preview 의 기본 위험도
-# destructive true 면 비가역 → 항상 HITL (COMPANY.md §6.3)
+# action      read | write | execute  — **행동의 비가역성**. risk 와 다른 축이다.
+#             fin.expense_read 는 MED 위험이지만 read 다 — 위험하다고 상태가 바뀌진 않는다.
+#             생략하면 risk 에서 추정한다(LOW=read/MED=write/HIGH=execute) — 보수적 폴백.
+# destructive true 면 비가역 → 항상 HITL (COMPANY.md §6.3). action 보다 우선한다.
 
 namespaces:
   eg:    { name: Experience Graph,  desc: "회사의 뇌 조회·축적" }
@@ -17,58 +20,62 @@ namespaces:
   dev:   { name: 개발,              desc: "git·테스트·빌드" }
   fin:   { name: 재무,              desc: "원장·경비 (L3)" }
   hr:    { name: 인사,              desc: "인사·급여 (L3)" }
+  doc:   { name: 문서·지식,         desc: "사내 문서 저장·검색 (P5)" }
+  crm:   { name: 고객·계약,         desc: "고객·문의·계약 (P5)" }
+  proj:  { name: 프로젝트,          desc: "프로젝트·이슈·태스크 (P5)" }
+  asset: { name: 자산 대장,         desc: "비품·라이선스 (P5)" }
   comm:  { name: 외부 통신,         desc: "메일·API 발송" }
   pay:   { name: 지급,              desc: "결제·이체 (비가역)" }
   ctl:   { name: 통제 평면,         desc: "킬 스위치·게이트 자체 — 에이전트는 영구 차단" }
 
 tools:
   # ── eg ──────────────────────────────────────────────────────────────
-  eg.search:            { risk: LOW,  destructive: false, desc: "페르소나·정책·과거 경험 조회" }
-  eg.record:            { risk: LOW,  destructive: false, desc: "Task/Finding/Observation 축적" }
+  eg.search:            { risk: LOW,  destructive: false, desc: "페르소나·정책·과거 경험 조회", action: read }
+  eg.record:            { risk: LOW,  destructive: false, desc: "Task/Finding/Observation 축적", action: write }
 
   # ── skill ───────────────────────────────────────────────────────────
-  skill.preview:        { risk: LOW,  destructive: false, desc: "실행 전 위험도 확인" }
-  skill.run:            { risk: MED,  destructive: false, desc: "스킬 실행 (개별 위험도는 스킬별)" }
+  skill.preview:        { risk: LOW,  destructive: false, desc: "실행 전 위험도 확인", action: read }
+  skill.run:            { risk: MED,  destructive: false, desc: "스킬 실행 (개별 위험도는 스킬별)", action: write }
 
   # ── fs ──────────────────────────────────────────────────────────────
-  fs.read:              { risk: LOW,  destructive: false, desc: "파일 읽기" }
-  fs.write:             { risk: MED,  destructive: false, desc: "파일 쓰기" }
+  fs.read:              { risk: LOW,  destructive: false, desc: "파일 읽기", action: read }
+  fs.write:             { risk: MED,  destructive: false, desc: "파일 쓰기", action: write }
   fs.delete:            { risk: HIGH, destructive: true,  desc:""파일 삭제"" }
 
   # ── net ─────────────────────────────────────────────────────────────
-  net.web_search:       { risk: LOW,  destructive: false, desc: "웹 검색 (L3 데이터 유출 경로 — 민감 팀은 deny)" }
-  net.fetch:            { risk: LOW,  destructive: false, desc: "URL 조회" }
+  net.web_search:       { risk: LOW,  destructive: false, desc: "웹 검색 (L3 데이터 유출 경로 — 민감 팀은 deny)", action: read }
+  net.fetch:            { risk: LOW,  destructive: false, desc: "URL 조회", action: read }
 
   # ── sec ─────────────────────────────────────────────────────────────
-  sec.siem_query:       { risk: LOW,  destructive: false, desc: "Wazuh SIEM 조회" }
-  sec.suricata_query:   { risk: LOW,  destructive: false, desc: "Suricata IPS 이벤트 조회" }
-  sec.waf_query:        { risk: LOW,  destructive: false, desc: "ModSecurity WAF 로그 조회" }
-  sec.trace_query:      { risk: LOW,  destructive: false, desc: "OTel 스팬·트레이스 레이크 조회" }
-  sec.docker_inspect:   { risk: MED,  destructive: false, desc: "컨테이너 상태 조사 (읽기)" }
+  sec.siem_query:       { risk: LOW,  destructive: false, desc: "Wazuh SIEM 조회", action: read }
+  sec.suricata_query:   { risk: LOW,  destructive: false, desc: "Suricata IPS 이벤트 조회", action: read }
+  sec.waf_query:        { risk: LOW,  destructive: false, desc: "ModSecurity WAF 로그 조회", action: read }
+  sec.trace_query:      { risk: LOW,  destructive: false, desc: "OTel 스팬·트레이스 레이크 조회", action: read }
+  sec.docker_inspect:   { risk: MED,  destructive: false, desc: "컨테이너 상태 조사 (읽기)", action: read }
   sec.container_stop:   { risk: HIGH, destructive: true,  desc:""컨테이너 중단 — HITL"" }
   sec.firewall_change:  { risk: HIGH, destructive: true,  desc:""방화벽·IPS 룰 변경 — HITL"" }
   sec.credential_revoke: { risk: HIGH, destructive: true,  desc:""자격증명 회수 — HITL"" }
   sec.isolate:          { risk: HIGH, destructive: true,  desc:""샌드박스 격리 — HITL"" }
 
   # ── sys ─────────────────────────────────────────────────────────────
-  sys.run_command:      { risk: MED,  destructive: false, desc: "셸 명령 (읽기 위주. 상태 변경은 스킬 게이트)" }
+  sys.run_command:      { risk: MED,  destructive: false, desc: "셸 명령 (읽기 위주. 상태 변경은 스킬 게이트)", action: read }
   sys.deploy:           { risk: HIGH, destructive: true,  desc:""배포 — HITL"" }
   sys.rm_rf_root:       { risk: HIGH, destructive: true,  desc:""파괴적 삭제 — 전사 영구 금지"" }
   sys.mkfs:             { risk: HIGH, destructive: true,  desc:""파일시스템 포맷 — 전사 영구 금지"" }
 
   # ── dev ─────────────────────────────────────────────────────────────
-  dev.git:              { risk: MED,  destructive: false, desc: "git 조작 (push 는 별도 게이트)" }
-  dev.tests:            { risk: LOW,  destructive: false, desc: "테스트 실행" }
-  dev.dependency_add:   { risk: HIGH, destructive: false, desc:""새 외부 의존성 추가 — HITL (공급망·라이선스)"" }
+  dev.git:              { risk: MED,  destructive: false, desc: "git 조작 (push 는 별도 게이트)", action: write }
+  dev.tests:            { risk: LOW,  destructive: false, desc: "테스트 실행", action: read }
+  dev.dependency_add:   { risk: HIGH, destructive: false, desc:""새 외부 의존성 추가 — HITL (공급망·라이선스)"", action: execute }
 
   # ── fin (L3) ────────────────────────────────────────────────────────
-  fin.ledger_read:      { risk: MED,  destructive: false, desc: "원장 조회 (L3)" }
+  fin.ledger_read:      { risk: MED,  destructive: false, desc: "원장 조회 (L3)", action: read }
   fin.ledger_write:     { risk: HIGH, destructive: true,  desc:""원장 기입 — append-only, HITL (L3)"" }
-  fin.expense_read:     { risk: MED,  destructive: false, desc: "경비 조회 (L3)" }
-  fin.expense_write:    { risk: MED,  destructive: false, desc: "경비 전표 초안 작성 (L3)" }
+  fin.expense_read:     { risk: MED,  destructive: false, desc: "경비 조회 (L3)", action: read }
+  fin.expense_write:    { risk: MED,  destructive: false, desc: "경비 전표 초안 작성 (L3)", action: write }
 
   # ── hr (L3) ─────────────────────────────────────────────────────────
-  hr.data_read:         { risk: HIGH, destructive: false, desc:""인사·급여 데이터 조회 (L3, 로컬 전용)"" }
+  hr.data_read:         { risk: HIGH, destructive: false, desc:""인사·급여 데이터 조회 (L3, 로컬 전용)"", action: read }
 
   # ── comm ────────────────────────────────────────────────────────────
   comm.external_send:   { risk: HIGH, destructive: true,  desc:""외부 발송(메일·API) — 비가역, HITL"" }
@@ -76,6 +83,25 @@ tools:
   # ── pay ─────────────────────────────────────────────────────────────
   pay.execute:          { risk: HIGH, destructive: true,  desc:""지급·결제 실행 — 비가역, 사람 전용"" }
 
+  # ── doc (문서·지식) ─────────────────────────────────────────────────
+  doc.search:           { risk: LOW,  destructive: false, desc: "문서·지식 전문 검색", action: read }
+  doc.read:             { risk: LOW,  destructive: false, desc: "문서 본문 조회 (등급 게이트 통과)", action: read }
+  doc.write:            { risk: MED,  destructive: false, desc: "문서 작성·개정 (개정 이력 보존)", action: write }
+  # ── crm (고객·계약) ─────────────────────────────────────────────────
+  crm.customer_read:    { risk: LOW,  destructive: false, desc: "고객 조회", action: read }
+  crm.customer_write:   { risk: MED,  destructive: false, desc: "고객 정보 갱신", action: write }
+  crm.inquiry_read:     { risk: LOW,  destructive: false, desc: "문의 조회", action: read }
+  crm.inquiry_draft:    { risk: MED,  destructive: false, desc: "문의 응답 초안 작성 (발송 아님)", action: write }
+  crm.contract_read:    { risk: MED,  destructive: false, desc: "계약 조회", action: read }
+  crm.contract_sign:    { risk: HIGH, destructive: true,  desc: "계약 체결 — 비가역, 사람 전용" }
+  # ── proj (프로젝트·이슈) ────────────────────────────────────────────
+  proj.read:            { risk: LOW,  destructive: false, desc: "프로젝트·태스크 조회", action: read }
+  proj.task_write:      { risk: MED,  destructive: false, desc: "태스크 생성·상태 변경", action: write }
+  proj.close:           { risk: MED,  destructive: false, desc: "태스크 종료 (근거 필수)", action: write }
+  # ── asset (자산 대장) ───────────────────────────────────────────────
+  asset.read:           { risk: LOW,  destructive: false, desc: "자산 대장 조회", action: read }
+  asset.write:          { risk: MED,  destructive: false, desc: "자산 등록·변경", action: write }
+  asset.dispose:        { risk: HIGH, destructive: true,  desc: "자산 폐기 — 비가역, HITL" }
   # ── ctl (에이전트 영구 차단) ────────────────────────────────────────
   ctl.modify_gate:      { risk: HIGH, destructive: true,  desc:""게이트 수정 — 에이전트 금지"" }
   ctl.modify_kill_switch: { risk: HIGH, destructive: true, desc:""킬 스위치 수정 — 에이전트 금지"" }

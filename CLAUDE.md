@@ -44,7 +44,7 @@ agents/               에이전트 하네스·워커 런타임 (P2)
 aoc/                  관제 시스템 — 수집·탐지·트리아지·대응·킬스위치·KPI (P3)
 apps/pixel-office/    픽셀 오피스 관제 콘솔 — index.html 파일 1개, 의존성 0 (P3)
 apps/groupware/       공개 홈페이지 + 사내 그룹웨어 — 승인 관문·EG 조정 UI (P4)
-apps/                 업무 시스템 (P5)
+biz/                  업무 시스템 — 문서·CRM·프로젝트·경리 (P5)
 packages/dawn_core/   공용 라이브러리 — 레지스트리 로더·통제 평면 컴파일러·설정
 infra/                배포·el34 연동 스크립트
 docs/                 참조 문서(context) + 구축 지시문(instructions) + 거버넌스
@@ -63,6 +63,7 @@ make check          # lint + test + control-lint + registry (CI와 동일)
 make aoc            # 관제 1회전 — 수집 → 탐지 → 트리아지
 make office-bg      # 픽셀 오피스 관제 콘솔 (:8800)
 make web-bg         # 홈페이지(:8810) + 그룹웨어(:8811)
+make biz-egcheck    # 업무 데이터 ↔ EG 자산 정합성
 ```
 
 ## 진행 상황

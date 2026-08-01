@@ -24,13 +24,18 @@ from dawn_core.eg import bridge as eg_bridge
 from dawn_core.eg.loader import check_references, derive_owned_by, read_seeds
 from dawn_core.paths import Paths
 
-# 설계서(docs/context/02_eg_schema.md §4)가 명시한 시드 규모: 노드 74 · 엣지 136.
-# 엣지가 137 인 이유: P2 에서 `USES_MODEL org:ccc → model:gptoss` 를 추가했다.
-# CCC 는 L3 자산(asset:fw-ips · asset:secrets)을 소유하는데 클라우드 모델만
-# 배정돼 있어 pol:l3-local-only 가 자기 자산 조회를 block 했다 —
-# P1 에서 org:ga 에 있었던 것과 같은 종류의 충돌. 로컬 경로를 열어 해소했다.
-EXPECTED_NODES = 74
-EXPECTED_EDGES = 137
+# 시드 규모. 설계서(docs/context/02_eg_schema.md §4)의 출발점은 노드 74 · 엣지 136 이고,
+# 그 뒤 **이유가 기록된 증가**만 허용한다:
+#   P2  +엣지 1  USES_MODEL org:ccc → model:gptoss
+#                (CCC 가 소유한 L3 자산을 자기가 조회 못 하던 충돌 해소)
+#   P5  +노드 3  asset:project · asset:knowledge · asset:fixed-asset (업무 시스템 자산)
+#       +엣지 9  각 자산의 LOCATED_IN · CLASSIFIED_AS · OWNED_BY
+#       +엣지 1  USES_MODEL org:mgmt → model:openlocal (고객 문의 = 개인정보 → 로컬)
+#       +엣지 1  HAS_PERSONA org:mgmt → persona:corporate (하위 조직엔 있는데 상위만 빠져 있었다)
+#
+# 숫자를 그냥 올리지 않는다. 늘었으면 왜 늘었는지가 여기 적혀야 한다.
+EXPECTED_NODES = 77
+EXPECTED_EDGES = 148
 
 
 @pytest.fixture(scope="module")

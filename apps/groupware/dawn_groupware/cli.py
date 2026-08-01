@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from dawn_agents import load_dotenv
+from dawn_core import jsonl
 from dawn_core.paths import Paths
 
 from .audit import AuditLog
@@ -221,7 +222,7 @@ def cmd_inquiries(args) -> int:
     if not p.is_file():
         print("접수된 문의가 없다")
         return 0
-    lines = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    lines = jsonl.read(p)
     if args.json:
         print(json.dumps(lines[-args.limit:], ensure_ascii=False, indent=2))
         return 0

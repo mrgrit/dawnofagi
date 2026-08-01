@@ -1,0 +1,39 @@
+# 고객관리팀 — 고객 데이터(L2)를 다룬다. 발송·계약·금액은 사람 몫.
+tools:
+  allow:
+    - eg.*
+    - skill.*
+    - fs.read
+    - doc.search
+    - doc.read
+    - crm.customer_read
+    - crm.inquiry_read
+    - crm.inquiry_draft
+    - crm.contract_read
+  deny:
+    - comm.*                # 외부 발송 금지 — 초안까지가 이 팀의 끝이다
+    - crm.contract_sign     # 계약 체결은 사람 전용
+    - crm.customer_write    # 고객 마스터 변경은 영업/사람 경로
+    - fin.*                 # 금액은 재무팀
+    - hr.*
+    - sec.*
+    - sys.*
+    - dev.*
+    - net.*                 # 고객 개인정보가 있는 맥락에서 웹 검색 금지
+    - fs.write              # 파일 산출물 없음 (초안은 CRM 안에)
+autonomy: A1
+hitl:
+  require_on:
+    - destructive
+    - irreversible
+    - external_send
+    - amount_over_threshold
+  amount_threshold_krw: 0        # 금액이 걸리면 무조건 사람
+budget:
+  max_steps: 30
+  max_tool_calls: 50
+model:
+  # 고객 문의 본문에는 이름·이메일·소속이 들어온다 — 개인정보다.
+  # EG(org:mgmt)도 로컬만 배정했다. 두 손잡이가 같은 말을 하게 둔다.
+  policy: local_only
+  force_local_when: [always]

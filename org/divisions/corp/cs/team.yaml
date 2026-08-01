@@ -3,7 +3,7 @@ division: corp
 name: 고객관리팀
 mission: 고객 문의·계정·클레임 처리.
 persona_default: corporate
-agents: []
+agents: [corp-cs-crm-01]
 work_domains: [corporate]
 zone: user
 max_sensitivity: L2

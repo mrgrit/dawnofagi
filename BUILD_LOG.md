@@ -1146,3 +1146,229 @@ gitleaks pre-commit 훅이 커밋을 막았다 — 감사 테스트가 마스킹
 > 참고: 이 BUILD_LOG 자체도 처음엔 그 리터럴을 인용했다가 훅에 걸렸다.
 > 문서에도 시크릿 모양의 문자열을 쓰지 않는다 — 규칙에 예외를 만드는 대신
 > 문장을 고쳤다.
+
+---
+
+## P5 — 업무 시스템 (문서·CRM·프로젝트·경리)
+
+**기간**: 2026-08-01
+**전제**: P2 워커·P3 관제·P4 그룹웨어. 업무 에이전트는 이 셋 위에서만 의미가 있다.
+
+### 완료 조건 (DoD)
+
+| # | 항목 | 결과 |
+|---|---|---|
+| 1 | 문서·지식 관리 + EG 연동 (문서 = Asset) | ✅ FTS5 검색·개정 이력, `asset:knowledge` 에 매임 |
+| 2 | CRM 최소셋 + 정형 업무 1건 자동 처리 | ✅ 문의 → 분류 → 근거 있는 초안. **발송 안 함** |
+| 3 | 프로젝트·이슈 ↔ 팀 오케스트레이터 연동 | ✅ 의존 판정은 코드, 위임은 P2 오케스트레이터 |
+| 4 | 경리: L3 로컬 모델 전용 + HITL | ✅ 평시·L3 모두 사내 GPU, 임계 초과 → 승인 대기 |
+| 5 | 업무 데이터가 EG Asset 으로 분류·검증 | ✅ `dawn-biz egcheck` — 어긋나면 실패 |
+| 6 | 업무 에이전트 행위가 관제에 나타남 | ✅ 아바타 3기가 자기 방에서 run/EG 아이콘 표시 |
+
+`scripts/verify-p5.sh --live` → **12 PASS / 0 FAIL**. 테스트 257개(P0~P5) 통과.
+
+### 자기검증 ① — 문의 → 초안 (실측)
+
+```
+① 이벤트   crm.inquiry.new  문의 #2 (박운영 / 예시기업 보안팀)
+② 에이전트 ✔ corp-cs-crm-01  model:openlocal→gpt-oss:120b (로컬)  HITL 0
+③ 결과     상태=drafted  분류=기술문의  초안 1365자 · trace a2b1a6d558bb
+```
+
+홈페이지 문의 폼 → `var/website/inquiries.jsonl` → `dawn-biz intake` → CRM →
+이벤트 → 에이전트 → 초안. **발송은 없다.**
+
+### 자기검증 ② — 경리 L3 (실측)
+
+```
+대상      EXP-2026-0801-002  1,250,000원 (장비)  [L3]
+라우팅    평시     → 사내 GPU open model  (로컬 강제)
+라우팅    L3 관여  → 사내 GPU open model  (로컬 강제)
+실행      ✔ corp-admin-clerk-01  model:openlocal→gpt-oss:120b (로컬)  HITL 1
+판정      상태=needs_approval  판정문 1553자
+```
+
+에이전트 산출물이 임계 초과를 정확히 짚었다:
+*"금액 초과(₩1,250,000 > ₩100,000), 전례 없음, 예산·계약 잔액 **알 수 없음** —
+현재 시스템에 예산 데이터가 제공되지 않음"*. 모르는 것을 모른다고 썼다.
+
+### 자기검증 ③ — EG 자산 · 관제 섹터 (실측)
+
+```
+✔ asset:knowledge     지식베이스        zone:dmz   L2  write         행 6
+✔ asset:crm           CRM(고객관리)     zone:dmz   L2  write         행 8
+✔ asset:project       프로젝트·이슈      zone:dmz   L2  write         행 14
+✔ asset:fixed-asset   자산 대장         zone:user  L1  write         행 2
+✔ asset:ledger        재무 원장         zone:int   L3  irreversible  행 2
+존별 배치  zone:dmz=28, zone:int=2, zone:user=2
+심각도    asset:ledger  🔴최고(6) = irreversible × sec:L3
+```
+
+### 산출물
+
+```
+biz/dawn_biz/
+  store.py    업무 DB — 모든 행이 eg_asset·security_level 을 선언한다
+  egsync.py   업무 데이터 ↔ EG **대조** (밀어 넣지 않는다)
+  skills.py   doc.* crm.* proj.* asset.* + fin.* 를 실제 업무 DB 로 교체
+  workers.py  P2 워커에 업무 스킬을 끼운다 (새 실행 경로 없음)
+  events.py   업무 트리거 + 홈페이지 문의 **한 방향** 흡수
+  seed.py     데모 데이터 — 레지스트리·통제 문서에서 파생
+  cli.py      dawn-biz docs|crm|proj|acct|egcheck|run|emit|intake|seed
+packages/dawn_core/dawn_core/jsonl.py   JSONL 읽기·쓰기 (splitlines 금지)
+org/agents/corp-cs-crm-01/     문의 처리 에이전트 (+ SOUL.md)
+org/agents/aoc-dev-pm-01/      프로젝트 조율 에이전트 (오케스트레이터, + SOUL.md)
+org/divisions/corp/cs/         AGENT_TEAM.md + gate.yaml
+work/corporate/CRM_INQUIRY_WORK.md · work/engineering/PROJECT_COORDINATION_WORK.md
+biz/tests/ 34개 · scripts/verify-p5.sh · scripts/lib/biz_drill.py
+```
+
+새 외부 의존성 **없음**.
+
+---
+
+## P5 에서 발견해 고친 것
+
+### 1. `splitlines()` 로 JSONL 을 읽고 있었다 — 감사 로그가 조용히 빌 수 있었다
+
+파이썬 `str.splitlines()` 는 개행 말고도 NEL(U+0085)·LS(U+2028)·PS(U+2029)·
+`\x0b\x0c\x1c\x1d\x1e` 로도 나눈다. `json.dumps(ensure_ascii=False)` 는 이
+문자들을 이스케이프하지 않으므로, 본문에 하나만 섞여도 **레코드가 여러 줄로
+쪼개져 전부 파싱 실패**하고, 실패는 조용히 건너뛰어진다.
+
+발견 경위: 고객 문의 본문이 latin-1 로 잘못 디코딩돼 NEL 을 포함하게 됐고,
+접수함 2건이 8줄로 쪼개져 전부 읽히지 않았다. 인코딩 버그가 먼저였지만
+**깨진 한 줄이 파일 전체를 못 읽게 만든 것**이 더 큰 문제다.
+
+영향 범위가 넓었다 — 트레이스 레이크(P3), 그룹웨어 감사 로그(P4),
+대응 이력(P3), 스팬 조회(P2).
+
+**조치**: `dawn_core/jsonl.py` 를 만들어 전부 교체했다. 개행으로만 나누고,
+쓸 때 LS·PS·NEL 을 이스케이프하고, `read_counted()` 로
+**깨진 줄 수를 숨기지 않는다**.
+
+### 2. 공개 폼이 UTF-8 을 latin-1 로 읽었다
+
+브라우저는 폼 값을 퍼센트 인코딩해 보내므로 실사용에는 문제가 없지만,
+원문 UTF-8 바이트를 보내는 클라이언트에서 한글이 통째로 깨졌다.
+
+**조치**: `site._utf8()` — latin-1 로 재인코딩해 UTF-8 디코딩이 되면 되살린다.
+되살릴 수 있을 때만 손댄다.
+
+### 3. `risk` 를 행동의 비가역성으로 쓰고 있었다 — 조회 한 번에 승인이 필요했다
+
+`ACTION_IRREVERSIBILITY = {LOW: read, MED: write, HIGH: execute}`.
+그런데 `fin.expense_read` 는 MED 위험이지만 **read** 다 — 위험하다고 상태가
+바뀌지는 않는다. 이 혼동 때문에 모든 조회가 write 로 잡혀 게이트에 걸렸다.
+
+**조치**: `org/tools.yaml` 에 `action: read|write|execute` 를 34개 도구에 명시했다.
+`destructive: true` 가 언제나 이기고, 선언이 없으면 위험도에서 추정한다(보수적 폴백).
+`Preview.action` 이 게이트로 전달된다.
+
+### 4. `pol:autonomy-gate` 가 읽기까지 막아 자율화 사다리를 무용하게 만들었다
+
+`org.autonomy_level < asset.sec_rank => require_hitl`. A1 조직이 L2 자산을
+**조회**할 때마다 승인이 필요했다. 자기 데이터를 못 읽는 A1 은 A0 과 같다.
+
+**조치**: **EG 를 고쳤다** (코드가 아니라).
+`org.autonomy_level < asset.sec_rank AND asset.irreversibility != 'read' => require_hitl`.
+읽기는 통과, 쓰기는 그대로 게이트. 회사 원리 #2("사람의 개입 = EG 조정")를
+우리가 먼저 지킨 사례다.
+
+### 5. `model_for_org` 가 BUILD_LOG P2 결정과 달랐다
+
+P2 결정 기록 #5: "id 로 정렬한 뒤 평시=클라우드 / L3=로컬 — 로컬 GPU 는 L3 전용으로
+아껴 둔다." 그런데 코드는 `models[0]` 을 **정렬 없이** 골랐고 클라우드 우선도
+없었다. 같은 EG 로도 DB 행 순서에 따라 라우팅이 달라질 수 있었다.
+
+**조치**: id 정렬 + 평시 클라우드 우선. 문서와 코드를 맞췄다.
+
+### 6. `make web-stop` 이 옛 서버를 못 죽여 수정이 반영되지 않았다
+
+`pgrep -f "[d]awn_groupware.cli"` 는 콘솔 스크립트로 띄운 `dawn-web site` 를
+못 잡는다. 코드를 고치고 재기동했는데 **옛 프로세스가 계속 서빙**해서
+버그가 안 고쳐진 것처럼 보였다. (P3 `office-stop` 때와 같은 실수)
+
+**조치**: 패턴을 `[d]awn.web |[d]awn_groupware.cli` 로. `pgrep -f` 는 ERE 이므로
+BRE 의 이스케이프된 파이프가 아니라 그냥 파이프를 써야 한다 — 이것도 같이 틀렸었다.
+
+### 7. FTS5 contentless 테이블은 삭제가 안 돼 문서 개정이 실패했다
+
+`content=''` 로 만든 FTS 테이블은 `DELETE` 를 지원하지 않아 재색인이 깨졌다.
+
+**조치**: 본문을 두 번 저장하는 비용을 받아들이고 개정이 되는 쪽을 택했다.
+사용자 질의가 FTS 문법을 깨는 경우의 폴백도 따옴표를 먼저 제거하도록 고쳤다.
+
+### 8. 업무 에이전트가 P2 데모 픽스처를 읽고 있었다
+
+업무 DB 가 생겼는데 `fin.expense_read` 는 여전히 `var/demo` 파일을 읽어,
+산출물의 금액(45,000원)이 장부(1,250,000원)와 달랐다. **제일 나쁜 종류의 오류다.**
+
+**조치**: `dawn_biz.skills` 에서 `fin.*` 를 같은 이름으로 재등록해 업무 DB 로
+교체했다.
+
+---
+
+## P5 설계 결정 기록
+
+**1. EG 에 밀어 넣지 않고 대조한다.**
+업무 시스템이 EG 에 노드를 만들면 EG 가 업무 데이터의 사본이 된다. 대신 업무 행이
+`eg_asset` 으로 **자기가 어느 자산에 속하는지 선언**하고, `egsync.check()` 가
+그 선언이 EG 에서 실재하는지·등급이 맞는지 검사한다. 어긋나면 `make check` 가 실패한다.
+
+**2. 새 실행 계층을 만들지 않았다.**
+업무 에이전트는 P2 `Worker` 에 업무 스킬 레지스트리를 끼운 것뿐이다. 그래야 행동
+게이트를 통과하고, 스팬을 뱉고, 픽셀 오피스의 자기 방에 나타난다.
+업무 시스템만 따로 도는 순간 그 부분은 관제 밖이다.
+
+**3. 의존 그래프 판정은 코드가 한다.**
+`assignable()` 은 파이썬이다. 모델이 위상 정렬을 하면 가끔 틀리고, 그 가끔이
+잘못된 순서로 배포되는 순간이다. 모델은 "왜 못 배정하는가"를 쓰는 일을 한다.
+
+**4. 홈페이지 문의는 한 방향으로만 흐른다.**
+공개 프로세스(L0)는 사내 DB 에 쓰지 않는다 — 파일로 떨어뜨리고 사내가 당겨 온다.
+방향이 하나면 실수로 뚫릴 자리가 없다.
+
+**5. 계약 체결·자산 폐기·원장 기입은 실행부가 없다.**
+게이트가 막는 것과 별개로 **코드 경로 자체가 없다.** `sign_contract()` 는
+`signed_by` 가 `human:` 으로 시작하지 않으면 `PermissionError` 다.
+
+**6. 문서 개정은 이전 판을 지우지 않는다.**
+산출물의 근거는 시점이 중요하다. "그때 무슨 문서를 보고 그렇게 판단했나"에
+답할 수 없으면 사후 재구성이 안 된다.
+
+**7. 데모 데이터를 지어내지 않았다.**
+사업 로드맵(`org/businesses/*.yaml`)이 프로젝트가 되고, 대상 세그먼트가 고객
+구분이 되고, 문서는 실제 통제 문서를 **가리킨다**(사본 아님). 사업을 추가하면
+프로젝트가 따라 붙는다 — "사업은 플러그인"이 여기서도 유지된다.
+
+**8. 경영관리부에 클라우드 모델을 배정하지 않았다.**
+고객 문의 본문에는 이름·이메일·소속이 들어온다. 개인정보다. 게이트도 EG 도
+같은 말을 하게 뒀다 (`make eg-bridge` 가 어긋남을 잡는다).
+
+---
+
+## P5 상태
+
+**DoD 6/6 충족. `scripts/verify-p5.sh --live` 12 PASS / 0 FAIL. 테스트 257개 통과. → P6 진행 가능.**
+
+에이전트가 5기로 늘었다:
+
+| 에이전트 | 조직 | 역할 | 모델 |
+|---|---|---|---|
+| corp-admin-clerk-01 | org:ga | 경비 처리 (L3) | 사내 GPU |
+| corp-cs-crm-01 | org:mgmt | 고객 문의 (L2, 개인정보) | 사내 GPU |
+| ccc-soc-triage-01 | org:ccc | 알럿 트리아지 | 평시 Sonnet / L3 사내 GPU |
+| aoc-dev-builder-01 | org:aoc-dev | 기능 구현 | Opus |
+| aoc-dev-pm-01 | org:aoc-dev | 프로젝트 조율 (오케스트레이터) | Opus |
+
+### 남은 것
+
+- **Opus/Sonnet 경로는 여전히 미검증** — `ANTHROPIC_API_KEY` 가 없다.
+  `aoc-dev-pm-01` 의 라이브 실행이 이것 때문에 막힌다(코드가 아니라 키 문제).
+  의존 판정·오케스트레이터 배선은 테스트로 고정했다.
+- **CRM 초안에 근거 없는 일정 언급** — 첫 실행 산출물에 "2~4주 소요"가 들어갔다.
+  SOP 가 금지한 것이고, P3 LLM-judge 가 잡아야 할 유형이다. P6 통합 검증에서
+  업무 산출물을 judge 에 물리는 것을 확인한다.
+- **P4 그룹웨어에 업무 화면 미연결** — CRM·프로젝트·경비를 포털에서 보는 화면은
+  P6 통합에서 붙인다. 지금은 `dawn-biz` CLI 로 본다.

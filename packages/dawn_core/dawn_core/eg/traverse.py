@@ -337,7 +337,11 @@ def org_profile(store: EGStore, org_id: str) -> OrgProfile:
         mission=org.prop("mission", ""),
         personas=sorted(personas, key=lambda n: n.id),
         policies=sorted(policies.values(), key=lambda n: n.id),
-        models=[n for n in store.out(org_id, "USES_MODEL") if n.type == "ModelPolicy"],
+        # id 로 정렬한다 — DB 행 순서에 의존하면 같은 EG 로도 라우팅이 달라진다.
+        models=sorted(
+            (n for n in store.out(org_id, "USES_MODEL") if n.type == "ModelPolicy"),
+            key=lambda n: n.id,
+        ),
         autonomy=autos[0] if autos else None,
         parent=parents[0] if parents else None,
         assets=[n for n in store.inc(org_id, "OWNED_BY") if n.type == "Asset"],
@@ -370,11 +374,14 @@ def model_for_org(store: EGStore, org_id: str, *, touches_l3: bool = False) -> d
             ),
         }
 
-    chosen = models[0] if models else None
+    # 평시에는 **클라우드를 먼저** 고른다 — 사내 GPU 는 L3 전용으로 아껴 둔다.
+    # 클라우드가 배정 안 된 조직(예: 고객 개인정보를 상시 다루는 곳)은 그대로 로컬.
+    cloud = [m for m in models if m.prop("cost_tier") != "local"]
+    chosen = (cloud or models)[0] if models else None
     return {
         "org": org_id,
         "touches_l3": False,
-        "forced_local": False,
+        "forced_local": bool(chosen is not None and chosen.prop("cost_tier") == "local"),
         "model": chosen.prop("model") if chosen else None,
         "model_id": chosen.id if chosen else None,
         "blocked": False,

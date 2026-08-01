@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 
-from dawn_core import Registry
+from dawn_core import Registry, jsonl
 from dawn_core.paths import Paths
 
 from .events import Event, default_dispatcher
@@ -242,7 +242,7 @@ def cmd_trace(args) -> int:
     target = (
         next((f for f in files if f.stem == args.trace_id), files[0]) if args.trace_id else files[0]
     )
-    spans = [json.loads(ln) for ln in target.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    spans = jsonl.read(target)
     if args.json:
         print(json.dumps(spans, ensure_ascii=False, indent=2))
         return 0

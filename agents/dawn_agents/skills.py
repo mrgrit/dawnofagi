@@ -37,6 +37,7 @@ class Preview:
     skill: str
     risk: str  # LOW | MED | HIGH
     destructive: bool
+    action: str  # read | write | execute | irreversible — **위험도와 다른 축**
     description: str
     args_summary: str
     touches_assets: list[str] = field(default_factory=list)
@@ -48,6 +49,7 @@ class Preview:
             "skill": self.skill,
             "risk": self.risk,
             "destructive": self.destructive,
+            "action": self.action,
             "description": self.description,
             "args": self.args_summary,
             "touches_assets": self.touches_assets,
@@ -128,6 +130,7 @@ class SkillRegistry:
             skill=name,
             risk=str(spec.get("risk", "MED")),
             destructive=bool(spec.get("destructive")),
+            action=action_of(spec),
             description=str(spec.get("desc", "")),
             args_summary=args,
             touches_assets=list(skill.touches),
@@ -150,6 +153,24 @@ class SkillRegistry:
             raise
         except Exception as exc:
             return SkillResult(ok=False, output="", error=f"{type(exc).__name__}: {exc}")
+
+
+# 위험도 → 행동 비가역성 **폴백**. 카탈로그가 `action:` 을 선언하면 그게 이긴다.
+# 둘은 다른 축이다: `fin.expense_read` 는 MED 위험이지만 read 다 —
+# 위험하다고 상태가 바뀌지는 않는다. 이걸 섞으면 조회 한 번에 승인이 필요해지고,
+# 그러면 자율화 사다리가 무용해진다 (P5 에서 실제로 그렇게 됐다).
+RISK_TO_ACTION = {"LOW": "read", "MED": "write", "HIGH": "execute"}
+VALID_ACTIONS = ("read", "write", "execute", "irreversible")
+
+
+def action_of(spec: dict[str, Any]) -> str:
+    """이 도구가 무엇을 하는가 — 읽나, 쓰나, 실행하나, 되돌릴 수 없나."""
+    if spec.get("destructive"):
+        return "irreversible"            # 비가역 선언이 언제나 이긴다
+    declared = str(spec.get("action", "")).strip()
+    if declared in VALID_ACTIONS:
+        return declared
+    return RISK_TO_ACTION.get(str(spec.get("risk", "MED")), "write")
 
 
 def _short(v: Any, n: int = 60) -> str:

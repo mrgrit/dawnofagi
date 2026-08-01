@@ -204,6 +204,11 @@
       "to": "persona:corporate"
     },
     {
+      "type": "HAS_PERSONA",
+      "from": "org:mgmt",
+      "to": "persona:corporate"
+    },
+    {
       "type": "GOVERNED_BY",
       "from": "persona:company-default",
       "to": "pol:auditable-logging"
