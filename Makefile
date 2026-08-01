@@ -196,8 +196,8 @@ aoc-replay:  ## 타임라인 리플레이 — make aoc-replay T=<trace-id>
 	@$(PY) -m dawn_aoc.cli replay $(T)
 
 .PHONY: office
-office:  ## 픽셀 오피스 — http://localhost:8800 (PORT=8800)
-	@$(PY) -m dawn_aoc.cli serve --port $${PORT:-8800}
+office:  ## 픽셀 오피스 관제 콘솔 — 이 호스트 IP:8800 (PORT/HOST 로 변경)
+	@$(PY) -m dawn_aoc.cli serve --port $${PORT:-8800} --host $${HOST:-0.0.0.0}
 
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check

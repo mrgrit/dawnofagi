@@ -313,15 +313,42 @@ def cmd_serve(args) -> int:
 
     # ThreadingHTTPServer: SO_REUSEADDR 를 켜준다(재기동 시 TIME_WAIT 로 안 막힘) +
     # /api/state 계산이 정적 파일 응답을 막지 않는다.
-    with http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as httpd:
-        print(f"{B}픽셀 오피스{Z}  http://localhost:{args.port}/")
-        print("  상태 API   /api/state   ·  트레이스 /api/trace/<id>")
-        print(f"  {D}Ctrl-C 로 종료{Z}")
+    with http.server.ThreadingHTTPServer((args.host, args.port), Handler) as httpd:
+        local_only = args.host in ("127.0.0.1", "localhost")
+        # 배너는 flush 한다 — nohup·파이프로 띄우면 블록 버퍼링돼서 주소가 안 보인다.
+        print(f"{B}픽셀 오피스{Z}", flush=True)
+        if local_only:
+            print(f"  http://localhost:{args.port}/    "
+                  f"{D}(로컬 전용 — 다른 PC 에서 보려면 --host 0.0.0.0){Z}", flush=True)
+        else:
+            for ip in _lan_ips():
+                print(f"  {B}http://{ip}:{args.port}/{Z}   ← 브라우저에서 여기로", flush=True)
+            print(f"  {Y}⚠ 인증 없이 열려 있다.{Z} 이 콘솔은 전 에이전트의 텔레메트리·"
+                  f"케이스·자산 이름을 그대로 보여준다.", flush=True)
+            print(f"    {D}el34 브리지(10.20.x)에도 함께 노출된다 — "
+                  f"ext 존에 attacker 컨테이너가 있다는 걸 잊지 마라.{Z}", flush=True)
+        print("  상태 API   /api/state   ·  트레이스 /api/trace/<id>", flush=True)
+        print(f"  {D}Ctrl-C 로 종료{Z}", flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("\n종료")
     return 0
+
+
+def _lan_ips() -> list[str]:
+    """이 호스트의 접속 가능한 IPv4 (도커·el34 브리지는 뺀다 — 사람이 쓸 주소가 아니다)."""
+    import socket
+
+    out: list[str] = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))          # 패킷을 보내지 않는다. 기본 경로만 물어본다.
+        out.append(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    return out or ["<이 호스트의 IP>"]
 
 
 def cmd_state(args) -> int:
@@ -400,6 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     x = s.add_parser("serve", help="픽셀 오피스 + 상태 API")
     x.add_argument("--port", type=int, default=8800)
+    x.add_argument("--host", default="127.0.0.1",
+                   help="기본은 로컬 전용. 다른 PC 에서 보려면 --host 0.0.0.0 "
+                        "(인증이 없으니 신뢰하는 망에서만)")
     x.set_defaults(func=cmd_serve)
     return p
 

@@ -210,7 +210,7 @@ make agent-emit E=siem.alert            # 이벤트 → 훅 기동 (상시 폴�
 make hitl                               # 승인 큐 — 사람이 개입하는 통로
 make trace                              # OTel 스팬 트리
 
-make office                             # 픽셀 오피스 관제 콘솔 → localhost:8800
+make office                             # 픽셀 오피스 관제 콘솔 → http://<이 호스트 IP>:8800
 make aoc                                # 관제 1회전 — 수집 → 탐지 → 트리아지
 make aoc-judge                          # + LLM-judge (모델 호출, GPU 필요)
 make aoc-cases                          # 관제 케이스 (ID=<case-id> 로 상세)
