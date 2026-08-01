@@ -1,0 +1,475 @@
+"""워커 에이전트 — 모든 에이전트가 공통으로 도는 4단계 루프.
+
+    ① eg_search      착수 전 — 내 조직의 페르소나·정책·과거 경험 조회
+    ② skill_preview  실행 전 — 위험도·비가역 확인
+    ③ skill_run      HIGH/destructive 면 HITL 승인 게이트 통과 후에만
+    ④ eg_record      완료 후 — 결과·finding 축적
+
+②를 건너뛴 ③은 **구조적으로 불가능하다** — `_use_skill()` 이 preview 없이는
+게이트를 만들지 않고, 게이트 없이는 run 을 호출하지 않는다.
+④ 없이 끝난 작업은 `WorkerRun.complete=False` 로 남는다.
+
+시스템 프롬프트는 통제 평면 컴파일 결과(4계층 + 게이트)에 EG 프로파일을 얹어 만든다.
+**행동 규칙을 코드에 박지 않는다** — 전부 조회 결과다 (COMPANY.md §6.2-6).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+from dawn_core import Registry, compile_agent
+from dawn_core.eg.cli import db_path as eg_db_path
+from dawn_core.eg.store import EGStore
+from dawn_core.eg.traverse import org_profile
+from dawn_core.paths import Paths
+
+from . import llm as llm_mod
+from .actiongate import ActionGate, GateDecision
+from .hitl import ApprovalQueue, auto_approve_enabled
+from .skills import Preview, SkillRegistry, SkillResult, build_default_registry
+from .telemetry import OP_CHAT, OP_EXECUTE_TOOL, OP_INVOKE_AGENT, Tracer, get_tracer
+
+
+class WorkerError(Exception):
+    """워커 실행 실패."""
+
+
+class CircuitBreaker(WorkerError):
+    """서킷 브레이커 발동 — 예산 초과 (gate.yaml budget)."""
+
+
+@dataclass
+class Step:
+    """루프 한 스텝의 기록."""
+
+    n: int
+    kind: str  # eg_search | preview | gate | run | chat | record | hitl
+    detail: str
+    ok: bool = True
+    data: dict[str, Any] = field(default_factory=dict)
+
+    def line(self) -> str:
+        mark = "●" if self.ok else "✘"
+        return f"  {mark} [{self.n:02d}] {self.kind:<12} {self.detail}"
+
+
+@dataclass
+class WorkerRun:
+    agent_id: str
+    task: str
+    steps: list[Step] = field(default_factory=list)
+    trace_id: str = ""
+    model: str = ""
+    model_policy: str = ""
+    provider: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
+    tool_calls: int = 0
+    hitl_requests: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
+    output: str = ""
+    recorded: bool = False
+    error: str = ""
+
+    @property
+    def complete(self) -> bool:
+        """④ eg_record 를 마쳐야 완료다."""
+        return self.recorded and not self.error
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent_id,
+            "task": self.task,
+            "trace_id": self.trace_id,
+            "model": self.model,
+            "model_policy": self.model_policy,
+            "provider": self.provider,
+            "tokens": {"in": self.tokens_in, "out": self.tokens_out},
+            "tool_calls": self.tool_calls,
+            "hitl_requests": self.hitl_requests,
+            "blocked": self.blocked,
+            "recorded": self.recorded,
+            "complete": self.complete,
+            "error": self.error,
+            "steps": [
+                {"n": s.n, "kind": s.kind, "detail": s.detail, "ok": s.ok} for s in self.steps
+            ],
+        }
+
+
+class Worker:
+    """통제 평면 + EG 위에서 도는 에이전트 하나."""
+
+    def __init__(
+        self,
+        agent_id: str,
+        *,
+        registry: Registry | None = None,
+        eg_store: EGStore | None = None,
+        skills: SkillRegistry | None = None,
+        tracer: Tracer | None = None,
+        queue: ApprovalQueue | None = None,
+        client: llm_mod.LLMClient | None = None,
+    ) -> None:
+        self.registry = registry or Registry.load()
+        self.paths: Paths = self.registry.paths
+        self.agent_id = agent_id
+
+        # 통제 평면 — 컴파일 실패 시 기동하지 않는다
+        self.compiled = compile_agent(self.registry, agent_id)
+        self.team = self.registry.teams[self.compiled.team_id]
+        self.eg_org = self.team.data.get("eg_org")
+
+        db = eg_db_path(self.paths)
+        self.eg = eg_store if eg_store is not None else (EGStore(db) if db.is_file() else None)
+        self.profile = (
+            org_profile(self.eg, self.eg_org)
+            if self.eg is not None and self.eg_org and self.eg.node(self.eg_org)
+            else None
+        )
+
+        self.skills = skills or build_default_registry(
+            self.registry.tool_catalog, root=self.paths.root, eg_store=self.eg
+        )
+        tier = ""
+        if self.profile is not None and self.profile.models:
+            tier = self.profile.models[0].prop("cost_tier", "")
+        self.gate = ActionGate(
+            self.compiled.gate,
+            self.eg,
+            autonomy=self.compiled.autonomy,
+            org_id=self.eg_org or "",
+            model_cost_tier=tier,
+        )
+        self.tracer = tracer or get_tracer(self.paths.root)
+        self.queue = queue or ApprovalQueue(self.paths.root)
+        self.client = client or llm_mod.LLMClient()
+
+        self.budget = self.compiled.gate.budget
+        self._step_n = 0
+
+    # ── 시스템 프롬프트 = 통제 평면 4계층 + EG 프로파일 ─────────────────
+    def system_prompt(self) -> str:
+        parts = [self.compiled.system_prompt()]
+        if self.profile is not None:
+            parts.append("\n<!-- ═══ EG: 내 조직의 페르소나·정책·모델·자율화 ═══ -->")
+            parts.append("```json")
+            parts.append(json.dumps(self.profile.to_dict(), ensure_ascii=False, indent=2))
+            parts.append("```")
+        parts.append(
+            "\n<!-- ═══ 사용 가능한 스킬 (이 밖의 도구는 게이트가 막는다) ═══ -->\n"
+            + "\n".join(f"- {s}" for s in self.compiled.declared_tools)
+        )
+        return "\n".join(parts)
+
+    # ── 스텝 기록 ───────────────────────────────────────────────────────
+    def _step(
+        self,
+        run: WorkerRun,
+        kind: str,
+        detail: str,
+        ok: bool = True,
+        *,
+        enforce: bool = True,
+        **data,
+    ) -> Step:
+        self._step_n += 1
+        max_steps = self.budget.get("max_steps")
+        # 종료 기록(error/중단 observation)은 예산에 걸지 않는다 —
+        # 브레이커가 감사 추적까지 끊으면 사후 재구성이 불가능해진다.
+        if enforce and max_steps and self._step_n > max_steps:
+            raise CircuitBreaker(
+                f"서킷 브레이커 — 스텝 {self._step_n} > 예산 {max_steps} (gate.yaml budget)"
+            )
+        s = Step(self._step_n, kind, detail, ok, data)
+        run.steps.append(s)
+        return s
+
+    # ── ① eg_search ────────────────────────────────────────────────────
+    def eg_search(self, run: WorkerRun, query: str, limit: int = 5) -> str:
+        with self.tracer.span(
+            OP_EXECUTE_TOOL,
+            **{"gen_ai.tool.name": "eg.search", "gen_ai.operation.name": OP_EXECUTE_TOOL},
+        ) as sp:
+            res = self.skills.run("eg.search", query=query, limit=limit)
+            sp.set(**{"dawn.eg.hits": res.meta.get("hits", 0), "dawn.gate.decision": "log_only"})
+        self._step(run, "eg_search", f'"{query}" → {res.meta.get("hits", 0)}건', res.ok)
+        return res.output
+
+    # ── ②③ preview → gate → run ────────────────────────────────────────
+    def use_skill(
+        self, run: WorkerRun, name: str, **kwargs
+    ) -> tuple[GateDecision, SkillResult | None]:
+        """스킬 하나를 쓴다. **preview 없이는 절대 run 하지 않는다.**"""
+        max_calls = self.budget.get("max_tool_calls")
+        if max_calls and run.tool_calls >= max_calls:
+            raise CircuitBreaker(f"서킷 브레이커 — 도구 호출 {run.tool_calls} ≥ 예산 {max_calls}")
+
+        # ② preview (건너뛸 수 없다)
+        preview: Preview = self.skills.preview(name, **kwargs)
+        self._step(run, "preview", preview.line())
+
+        # 게이트 판정 (통제평면 × 스킬위험도 × EG)
+        decision = self.gate.evaluate(preview, declared_tools=self.compiled.declared_tools)
+        self._step(run, "gate", decision.line(), decision.allowed_without_human)
+
+        with self.tracer.span(
+            OP_EXECUTE_TOOL,
+            **{
+                "gen_ai.tool.name": name,
+                "gen_ai.operation.name": OP_EXECUTE_TOOL,
+                "dawn.skill.risk": preview.risk,
+                "dawn.skill.destructive": preview.destructive,
+                "dawn.gate.decision": decision.decision,
+                "dawn.gate.reasons": "; ".join(decision.reasons),
+                "dawn.severity": decision.severity,
+                "dawn.assets": ",".join(decision.assets),
+                "dawn.policies": ",".join(decision.policies),
+            },
+        ) as sp:
+            # block — 실행하지 않는다
+            if decision.blocked:
+                run.blocked.append(name)
+                ap = self.queue.request(
+                    agent_id=self.agent_id,
+                    skill=name,
+                    gate_decision=decision,
+                    args=kwargs,
+                    trace_id=run.trace_id,
+                )
+                run.hitl_requests.append(ap.id)
+                sp.set(**{"dawn.hitl.id": ap.id})
+                sp.event("blocked", reason="; ".join(decision.reasons))
+                self._step(run, "hitl", f"차단 → 승인 큐 {ap.id}", False)
+                return decision, None
+
+            # require_hitl — 승인 전에는 실행하지 않는다
+            if decision.needs_hitl:
+                ap = self.queue.request(
+                    agent_id=self.agent_id,
+                    skill=name,
+                    gate_decision=decision,
+                    args=kwargs,
+                    trace_id=run.trace_id,
+                )
+                run.hitl_requests.append(ap.id)
+                sp.set(**{"dawn.hitl.id": ap.id})
+                if not auto_approve_enabled():
+                    sp.event("awaiting_approval", approval_id=ap.id)
+                    self._step(run, "hitl", f"승인 대기 {ap.id} — 실행 보류", False)
+                    return decision, None
+                self.queue.decide(
+                    ap.id, approve=True, by="DAWN_AUTO_APPROVE", note="데모/테스트 자동 승인"
+                )
+                sp.event("auto_approved", approval_id=ap.id)
+                self._step(run, "hitl", f"자동 승인 {ap.id} (DAWN_AUTO_APPROVE)")
+
+            # ③ run
+            result = self.skills.run(name, **kwargs)
+            run.tool_calls += 1
+            sp.set(**{"dawn.skill.ok": result.ok})
+            if not result.ok:
+                sp.status = "ERROR"
+                sp.status_message = result.error
+            self._step(
+                run, "run", f"{name} → {'성공' if result.ok else result.error[:70]}", result.ok
+            )
+            return decision, result
+
+    # ── 모델 호출 ───────────────────────────────────────────────────────
+    def resolve_model(self, *, touches_l3: bool) -> llm_mod.Resolved:
+        """EG 가 고른 모델. **여기서 정책을 만들지 않는다 — 조회할 뿐.**"""
+        policy_id = None
+        if self.profile is not None and self.profile.models:
+            models = sorted(self.profile.models, key=lambda m: m.id)  # 결정적
+            local = [m for m in models if m.prop("cost_tier") == "local"]
+            cloud = [m for m in models if m.prop("cost_tier") != "local"]
+            # `force_local_when: [l3_data]` 는 "L3 를 만질 때" 라는 조건이지
+            # 무조건이 아니다. 문자열을 그냥 넘기면 항상 참이 되어
+            # 모든 조직이 로컬로 라우팅된다 — 조건을 실제로 판정한다.
+            force_local = (
+                touches_l3
+                or self.compiled.gate.model_policy == "local_only"
+                or (touches_l3 and self.compiled.gate.forces_local_model("l3_data"))
+            )
+            if force_local:
+                # L3 — 로컬만. 없으면 resolve() 가 정책 위반으로 막는다.
+                policy_id = local[0].id if local else models[0].id
+            else:
+                # 평시 — 로컬은 L3 전용으로 아껴 두고 배정된 일반 모델을 쓴다.
+                policy_id = (cloud or local)[0].id
+        return llm_mod.resolve(policy_id, touches_l3=touches_l3)
+
+    def chat(
+        self, run: WorkerRun, prompt: str, *, touches_l3: bool = False, max_tokens: int = 1500
+    ) -> str:
+        resolved = self.resolve_model(touches_l3=touches_l3)
+        run.model, run.provider, run.model_policy = (
+            resolved.model,
+            resolved.provider,
+            resolved.model_policy_id,
+        )
+        system = self.system_prompt()
+
+        with self.tracer.span(
+            OP_CHAT,
+            **{
+                "gen_ai.operation.name": OP_CHAT,
+                "gen_ai.system": resolved.provider,
+                "gen_ai.request.model": resolved.model,
+                "gen_ai.request.max_tokens": max_tokens,
+                "dawn.model.policy": resolved.model_policy_id,
+                "dawn.model.local": resolved.is_local,
+                "dawn.model.reason": resolved.reason,
+            },
+        ) as sp:
+            content = self.tracer.content(prompt)
+            if content:
+                sp.event("gen_ai.user.message", content=content)
+            t0 = time.monotonic()
+            comp = self.client.complete(
+                resolved, system=system, prompt=prompt, max_tokens=max_tokens
+            )
+            sp.set(
+                **{
+                    "gen_ai.response.model": comp.model,
+                    "gen_ai.usage.input_tokens": comp.input_tokens,
+                    "gen_ai.usage.output_tokens": comp.output_tokens,
+                    "gen_ai.response.finish_reasons": comp.stop_reason,
+                    "dawn.latency_ms": round((time.monotonic() - t0) * 1000),
+                }
+            )
+            out = self.tracer.content(comp.text)
+            if out:
+                sp.event("gen_ai.choice", content=out)
+
+        run.tokens_in += comp.input_tokens
+        run.tokens_out += comp.output_tokens
+        max_tok = self.budget.get("max_tokens")
+        if max_tok and (run.tokens_in + run.tokens_out) > max_tok:
+            raise CircuitBreaker(
+                f"서킷 브레이커 — 토큰 {run.tokens_in + run.tokens_out} > 예산 {max_tok}"
+            )
+        self._step(run, "chat", f"{resolved.model} in={comp.input_tokens} out={comp.output_tokens}")
+        return comp.text
+
+    # ── ④ eg_record ────────────────────────────────────────────────────
+    def eg_record(self, run: WorkerRun, kind: str, summary: str, detail: str = "") -> None:
+        with self.tracer.span(
+            OP_EXECUTE_TOOL,
+            **{"gen_ai.tool.name": "eg.record", "gen_ai.operation.name": OP_EXECUTE_TOOL},
+        ) as sp:
+            res = self.skills.run("eg.record", kind=kind, summary=summary, detail=detail)
+            sp.set(
+                **{"dawn.eg.node": res.meta.get("node_id", ""), "dawn.gate.decision": "log_only"}
+            )
+        run.recorded = run.recorded or res.ok
+        self._step(run, "record", f"{kind}: {res.output}", res.ok)
+
+    # ── 전체 루프 ───────────────────────────────────────────────────────
+    def run(
+        self,
+        task: str,
+        *,
+        touches_l3: bool | None = None,
+        extra_skills: list[tuple[str, dict]] | None = None,
+    ) -> WorkerRun:
+        """4단계 루프를 한 번 돈다."""
+        wr = WorkerRun(agent_id=self.agent_id, task=task)
+        self._step_n = 0
+
+        with self.tracer.span(
+            OP_INVOKE_AGENT,
+            **{
+                "gen_ai.operation.name": OP_INVOKE_AGENT,
+                "gen_ai.agent.id": self.agent_id,
+                "gen_ai.agent.name": self.registry.agents[self.agent_id].data["name"],
+                "dawn.team": self.compiled.team_id,
+                "dawn.division": self.compiled.division_id,
+                "dawn.eg_org": self.eg_org or "",
+                "dawn.persona": self.compiled.persona,
+                "dawn.autonomy": self.compiled.autonomy,
+                "dawn.zone": self.compiled.zone or "",
+            },
+        ) as root:
+            wr.trace_id = root.trace_id
+            try:
+                # ① eg_search — 착수 전 참조
+                ctx = self.eg_search(wr, task[:80])
+
+                # ②③ 업무 스킬 (호출자가 지정한 것)
+                gathered: list[str] = []
+                l3 = bool(touches_l3)
+                for name, kwargs in extra_skills or []:
+                    decision, result = self.use_skill(wr, name, **kwargs)
+                    l3 = l3 or decision.touches_l3
+                    if result is not None and result.ok:
+                        gathered.append(f"### {name}\n{result.output[:3000]}")
+
+                # 모델 호출 — L3 관여 여부가 라우팅을 바꾼다
+                prompt = _build_prompt(task, ctx, gathered)
+                wr.output = self.chat(wr, prompt, touches_l3=l3)
+
+                # ④ eg_record — 없으면 미완료
+                self.eg_record(
+                    wr,
+                    "task",
+                    f"[{self.agent_id}] {task[:80]}",
+                    (wr.output or "")[:2000],
+                )
+                root.set(
+                    **{
+                        "dawn.run.complete": wr.complete,
+                        "dawn.run.tool_calls": wr.tool_calls,
+                        "dawn.run.hitl": len(wr.hitl_requests),
+                    }
+                )
+            except (CircuitBreaker, llm_mod.LLMError) as exc:
+                wr.error = f"{type(exc).__name__}: {exc}"
+                root.status = "ERROR"
+                root.status_message = wr.error
+                self._step(wr, "error", wr.error, False, enforce=False)
+                # 중단해도 지금까지의 상태는 기록한다 (*_WORK.md §8 실패 시 처리)
+                try:
+                    res = self.skills.run(
+                        "eg.record",
+                        kind="observation",
+                        summary=f"[{self.agent_id}] 중단: {task[:60]}",
+                        detail=wr.error,
+                    )
+                    self._step(wr, "record", f"중단 기록: {res.output}", res.ok, enforce=False)
+                except Exception:
+                    pass
+        return wr
+
+
+def _build_prompt(task: str, eg_context: str, gathered: list[str]) -> str:
+    parts = [
+        "## 업무",
+        task,
+        "",
+        "## EG 사전 참조 (eg_search 결과)",
+        eg_context or "(관련 전례 없음)",
+    ]
+    if gathered:
+        parts += ["", "## 수집한 자료 (skill_run 결과)", *gathered]
+    parts += [
+        "",
+        "## 지시",
+        "위 통제 평면(회사 헌법 → 팀 행동양식 → 업무 지침 → 개인 페르소나)과",
+        "EG 프로파일을 그대로 따라 산출물을 작성하라.",
+        "해당 업무 지침의 산출물 규격을 지키고, 근거 없는 단정을 쓰지 마라.",
+    ]
+    return "\n".join(parts)
+
+
+_SENTENCE = re.compile(r"[.!?。\n]")
+
+
+def summarize(text: str, n: int = 2) -> str:
+    parts = [p.strip() for p in _SENTENCE.split(text) if p.strip()]
+    return " ".join(parts[:n])[:300]

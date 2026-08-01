@@ -141,7 +141,8 @@ eg/                           Experience Graph — 회사의 뇌
   seed/                         시드 — 사람이 고치는 곳 (조직·정책·페르소나·자산)
   validate.py                   무결성 + 핵심 순회 검증 (오류 0 이어야 주입)
   snapshots/                    주입 스냅샷 (롤백·감사)
-agents/                       에이전트 하네스 · 워커 런타임            (P2)
+agents/                       에이전트 하네스 · 워커 런타임
+  dawn_agents/                  루프 · 행동게이트 · 정책평가 · 라우팅 · HITL · 텔레메트리
 aoc/                          관제 시스템 (수집·탐지·트리아지·대응)     (P3)
 apps/                         홈페이지 · 그룹웨어 · 픽셀오피스          (P4/P5)
 infra/                        배포 · el34 연동
@@ -180,7 +181,7 @@ make health                # 도달성 + 인증 확인
 |---|---|---|
 | **P0** | 부트스트랩 — 모노레포·CI·시크릿·el34 연결·**통제 평면** | ✅ 완료 |
 | **P1** | Experience Graph — 회사의 뇌 (노드 74 · 엣지 136) | ✅ 완료 |
-| P2 | 에이전트 하네스·루프·행동 게이트 | ⬜ |
+| **P2** | 에이전트 하네스·루프·행동 게이트 | ✅ 완료 |
 | P3 | AOC 관제 시스템 · 픽셀 오피스 | ⬜ |
 | P4 | 홈페이지 · 그룹웨어 | ⬜ |
 | P5 | 업무 시스템 (CRM·문서·프로젝트·경리) | ⬜ |
@@ -198,6 +199,12 @@ make check           # lint · test · registry · compile · control-lint · eg
 make verify          # P0+P1 자기검증 (DoD + 개입·게이트 실증)
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
+
+make agent-info A=ccc-soc-triage-01     # 이 에이전트가 실제로 뭘 할 수 있나
+make agent-run  A=<id> T="업무"          # 워커 루프 1회 (4단계 + 게이트 + 스팬)
+make agent-emit E=siem.alert            # 이벤트 → 훅 기동 (상시 폴링 아님)
+make hitl                               # 승인 큐 — 사람이 개입하는 통로
+make trace                              # OTel 스팬 트리
 ```
 
 ---

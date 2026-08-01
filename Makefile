@@ -34,7 +34,7 @@ fmt:  ## ruff format (수정)
 
 .PHONY: test
 test:  ## pytest
-	@$(PY) -m pytest packages -q
+	@$(PY) -m pytest packages agents -q
 
 # ══ 레지스트리 · 통제 평면 ══════════════════════════════════════════════
 .PHONY: registry
@@ -104,6 +104,30 @@ eg-routing:  ## 에이전트별 실효 모델 라우팅 표
 eg-snapshot:  ## EG 스냅샷 저장 (롤백·감사)
 	@$(PY) -m dawn_core.cli eg snapshot --label $${LABEL:-governance}
 
+# ══ 에이전트 하네스 (P2) ════════════════════════════════════════════════
+.PHONY: agent-info
+agent-info:  ## 에이전트 능력·게이트 조회 — make agent-info A=<id>
+	@test -n "$(A)" || { echo "사용법: make agent-info A=ccc-soc-triage-01"; exit 2; }
+	@$(PY) -m dawn_agents.cli info $(A)
+
+.PHONY: agent-run
+agent-run:  ## 워커 루프 1회 — make agent-run A=<id> T="업무"
+	@test -n "$(A)" -a -n "$(T)" || { echo ' 사용법: make agent-run A=<id> T="업무"'; exit 2; }
+	@$(PY) -m dawn_agents.cli run $(A) "$(T)"
+
+.PHONY: agent-emit
+agent-emit:  ## 이벤트 발생 → 훅 기동 — make agent-emit E=siem.alert
+	@test -n "$(E)" || { echo "사용법: make agent-emit E=siem.alert"; exit 2; }
+	@$(PY) -m dawn_agents.cli emit $(E) --dry-run
+
+.PHONY: hitl
+hitl:  ## HITL 승인 큐
+	@$(PY) -m dawn_agents.cli hitl list
+
+.PHONY: trace
+trace:  ## 최근 OTel 스팬 트리
+	@$(PY) -m dawn_agents.cli trace
+
 # ══ 모델 (사내 GPU — 이 호스트에 GPU 없음) ══════════════════════════════
 .PHONY: gpu-check
 gpu-check:  ## 사내 GPU 서버(ollama) 도달 확인 — VPN 필요. L3 업무의 전제
@@ -148,6 +172,7 @@ check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 �
 verify:  ## P0+P1 자기검증 (DoD + 개입·게이트 실증)
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
+	@bash scripts/verify-p2.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔

@@ -497,3 +497,174 @@ P2 가 이 위에서 쓸 것이 준비됐다:
 - `model_for_org(org, touches_l3=)` — 모델 라우팅 (L3 로컬 강제 포함)
 - `gate_for(asset)` / `severity_of(asset)` — 행동 게이트 엔진의 EG 측 입력
 - `dawn eg bridge` — 통제 평면과의 정합성 (CI 에서 강제)
+
+---
+
+## P2 — 에이전트 하네스·루프 엔지니어링
+
+**기간**: 2026-08-01
+**전제**: P0(통제 평면) + P1(EG) 완료. 두 개가 다 있어야 워커가 기동한다.
+
+### 완료 조건 (DoD)
+
+| # | 항목 | 결과 |
+|---|---|---|
+| 1 | 워커 루프 4단계 (eg_search→preview→run→record) | ✅ `preview` 없는 `run` 은 **구조적으로 불가능**, `record` 없으면 `complete=False` |
+| 2 | 행동 게이트: destructive+L3 → HITL | ✅ `pay.execute`·`fin.ledger_write` = block, 승인 큐로 |
+| 3 | 모델 라우팅: 조직별로 다른 모델 (EG 기반) | ✅ opus/sonnet/haiku/gpt-oss, L3 시 로컬 강제 |
+| 4 | 팀 오케스트레이터가 워커에 위임 | ✅ 리더 무발화 · 검증자≠생산자 · phase/depends_on 위상정렬 |
+| 5 | 이벤트 구동(훅), 상시 폴링 아님 | ✅ 폴링 루프 부재를 **테스트로 고정** |
+| 6 | OTel 스팬 방출 (invoke_agent/execute_tool 트리) | ✅ GenAI semconv 1.29.0 pin, JSONL 트레이스 레이크 |
+| 7 | 2개 조직 워커 실제 실행 데모 | ✅ 사내 GPU 에서 실제 추론 (아래 §데모) |
+
+`scripts/verify-p2.sh --live` → **11 PASS / 0 FAIL**. 테스트 106개(P0+P1+P2) 통과.
+
+### 데모 — 2개 조직, 실제 모델 호출
+
+```
+$ .venv/bin/python scripts/lib/demo_two_orgs.py
+  corp-admin-clerk-01    complete=True  model:openlocal→ollama/gpt-oss:120b  tools=1 hitl=1 tokens=247/1025
+    스팬: execute_tool → execute_tool → chat → execute_tool → invoke_agent
+  ccc-soc-triage-01      complete=True  model:gptoss→ollama/gpt-oss:120b     tools=1 hitl=0 tokens=10166/1500
+```
+
+**경리 에이전트**는 `corporate/expense-processing` 의 산출물 템플릿을 그대로 따랐고,
+125만원이 10만원 임계를 넘는다는 판정과 그 근거를 스스로 밝혔으며,
+*"승인 전 원장(`fin.ledger_write`)에 어떠한 변경도 이루어지지 않습니다"* 라고 명시했다.
+
+**CCC 트리아지 에이전트**는 `security/alert-triage` 의 템플릿을 따르고,
+**확인된 사실과 추정을 문장 단위로 갈랐으며**(persona:secops 의 원칙),
+자산을 EG 에서 특정하지 못하자 절차대로 `escalate` 했다 —
+그리고 후속 제안으로 "10.20.40.81 을 EG 에 자산으로 등록하라"를 냈다.
+
+**행동 규칙을 코드에 박지 않았다.** 위 행동은 전부 통제 평면 4계층 + EG 프로파일이
+시스템 프롬프트로 주입된 결과다. `if persona == "secops"` 같은 분기는 한 줄도 없다.
+
+### 산출물
+
+```
+agents/dawn_agents/
+  telemetry.py    OTel GenAI 스팬 + PII 마스킹 (P3 수집 계층 입력)
+  skills.py       skill_preview / skill_run — 카탈로그 강제, 비가역은 미구현
+  policy.py       EG Policy.rule 평가기 — 조건을 실제로 판정
+  actiongate.py   통제평면 × 스킬위험도 × EG → block|require_hitl|warn|log_only
+  llm.py          EG 라우팅 실행 (anthropic / ollama). L3 는 클라우드에 보내지 않는다
+  hitl.py         승인 큐 (append-only, P4 그룹웨어 백엔드)
+  worker.py       4단계 루프 + 서킷 브레이커
+  orchestrator.py 팀 위임 (무발화 리더 · 검증자 분리 · 위상정렬)
+  events.py       이벤트 훅 + 큐 (폴링 루프 없음)
+  cli.py          dawn-agent info|run|preview|team|emit|hitl|trace
+agents/tests/     36개
+scripts/verify-p2.sh · scripts/lib/demo_two_orgs.py
+```
+
+### 새 의존성
+
+| 패키지 | 이유 | 라이선스 |
+|---|---|---|
+| anthropic ≥0.60 | 클라우드 모델(Opus/Sonnet/Haiku) 호출 — 공식 SDK | MIT |
+
+ollama 는 표준 라이브러리 `urllib` 로 호출한다(HTTP). OTel SDK 는 **일부러 안 넣었다** — 아래 결정 기록 참조.
+
+---
+
+## P2 에서 발견해 고친 것
+
+### 1. 게이트가 **모든 행동을 HITL 로 막았다** (게이트를 무의미하게 만드는 실패)
+
+EG 정책의 `enforcement` 를 조건 무시하고 그대로 적용했더니, 자산을 스치기만 해도
+그 등급에 걸린 정책 전부가 발동해 `eg.search` 조차 승인 대기가 됐다.
+그러면 에이전트는 아무것도 못 하고 사람은 승인 피로로 전부 눌러 버린다 —
+**게이트가 있으나 마나 한 상태**가 되는 전형적 실패다.
+
+**조치**: `02_policies.json` 의 `rule` 은 애초에 판정 가능한 조건식이다
+(`asset.sec_rank == 3 AND model.cost_tier != 'local' => block`).
+`policy.py` 에 평가기를 만들어 **조건을 실제로 판정**한다.
+판정에 필요한 사실이 없으면 **보수적으로 발동**하고, 모르는 술어는 `unknown` 으로 표시해
+조용히 무시되지 않게 했다. Policy 노드의 `rule` 필드가 이제 실제로 쓰인다.
+
+### 2. 심각도를 **자산의** 비가역성으로 계산했다
+
+`severity = Asset.irreversibility × SecurityLevel.rank` 를 문자 그대로 쓰면,
+원장을 *읽기만* 해도 원장이 `irreversible` 이라 최고 심각도가 된다.
+비가역성은 **행동의 속성**이지 자산의 속성이 아니다.
+
+**조치**: 스킬 위험도(LOW/MED/HIGH/destructive)를 행동의 비가역성 축으로 쓰고,
+자산에서는 보안등급만 가져온다. 읽기는 읽기로 계산된다.
+
+### 3. `eg.search`/`eg.record` 가 자기 인프라 때문에 막혔다
+
+두 스킬이 `asset:eg-db`(L2)를 "만지는 자산"으로 선언하고 있었다.
+그러면 **모든 에이전트의 ①④ 단계**가 게이트에 걸려 루프가 아예 안 돈다.
+
+**조치**: EG 스키마의 `Task -TOUCHED-> Asset` 은 "그 작업이 건드린 **업무** 자산"이지
+"작업 기록을 어디에 남겼나"가 아니다. 루프 계측에서 자산 선언을 뺐다.
+`test_loop_instrumentation_is_not_gated` 로 고정했다.
+
+### 4. `force_local_when: [l3_data]` 를 무조건으로 읽었다
+
+`gate.forces_local_model("l3_data")` 에 문자열을 그냥 넘기면 **항상 참**이 되어
+모든 조직이 로컬 모델로 라우팅됐다. 조건("L3 를 만질 때")이 무시된 것이다.
+
+**조치**: `touches_l3` 를 실제로 판정해서 넘긴다. 테스트로 조직별 라우팅 차이를 고정했다.
+
+### 5. 서킷 브레이커가 **감사 추적까지 끊었다**
+
+예산 초과로 브레이커가 걸리면 중단 기록(`eg_record`)마저 스텝 한도에 걸려 실패했다.
+브레이커가 사후 재구성을 불가능하게 만들면 EU AI Act 12조 정렬이 깨진다.
+
+**조치**: 종료 기록 스텝은 예산에서 면제한다. 중단해도 "왜 중단했는지"는 남는다.
+
+### 6. CCC 가 자기 L3 자산을 조회할 수 없었다 (P1 org:ga 와 같은 부류)
+
+`sec.suricata_query`(asset:fw-ips, L3)가 **block** 됐다 —
+`pol:l3-local-only` 가 "L3 인데 CCC 모델은 클라우드(Sonnet)"로 판정했기 때문이다.
+CCC 는 방화벽·자격증명 같은 L3 자산을 **소유**하는데 로컬 경로가 없었다.
+
+**조치**: `USES_MODEL org:ccc → model:gptoss` 추가 (엣지 136 → **137**).
+평시엔 Sonnet, L3 관여 시 사내 GPU 로 라우팅된다.
+P1 에서 `org:ga` 에 했던 것과 같은 조치이고, 이번엔 **행동 게이트가** 잡았다.
+
+---
+
+## P2 설계 결정 기록
+
+**1. OTel SDK 를 쓰지 않고 semconv 만 따랐다.**
+P2 DoD 는 "스팬 방출 확인"이다. `opentelemetry-sdk` + OTLP exporter 는 의존성 2개와
+콜렉터 1대를 요구하는데, fresh Linux 배포에서 그게 없어도 에이전트는 돌아야 한다.
+**속성 이름은 GenAI semconv(1.29.0 pin) 그대로** 쓰고 익스포터만 JSONL 트레이스 레이크로 했다.
+P3 에서 exporter 를 갈아끼울 때 스팬 속성은 한 글자도 안 바뀐다.
+
+**2. 비가역 스킬은 등록만 하고 실행부를 비웠다.**
+`sec.firewall_change` · `sys.deploy` · `fin.ledger_write` · `pay.execute` 는
+`run=None` 이다. 게이트 테스트에는 쓰이되 **실수로라도 실행되지 않는다.**
+`test_irreversible_skills_have_no_implementation` 이 이걸 고정한다.
+
+**3. HITL 큐는 append-only 다.**
+한 번 판정된 요청은 재판정할 수 없다(`ValueError`). 승인/거부 이력이 감사 증거이므로
+덮어쓰면 안 된다. P4 그룹웨어는 이 파일 큐를 그대로 읽으면 된다.
+
+**4. 이벤트 모듈에 폴링 루프가 없다는 것을 테스트로 고정했다.**
+`while True` / `time.sleep` 이 `events.py` 에 들어가면 테스트가 깨진다.
+"상시 시뮬레이션이 아니라 이벤트 구동"은 문서의 다짐이 아니라 검사 가능한 속성이어야 한다.
+
+**5. 모델 라우팅 결과는 결정적이다.**
+조직에 모델이 여럿 배정되면 `models[0]` 은 삽입 순서에 좌우된다.
+id 로 정렬한 뒤 **평시=클라우드 / L3=로컬** 규칙으로 고른다 —
+로컬 GPU 는 L3 전용으로 아껴 둔다.
+
+**6. 클라우드에 L3 를 "보냈다가 실패하면 막는" 방식이 아니다.**
+`llm.resolve()` 가 **호출 전에** 정책 위반으로 막는다. `pol:l3-local-only` 는
+"전송 금지"이지 "전송 후 차단"이 아니다.
+
+---
+
+## P2 상태
+
+**DoD 7/7 충족. `scripts/verify-p2.sh --live` 11 PASS / 0 FAIL. 테스트 106개 통과. → P3 진행 가능.**
+
+P3 가 이 위에서 쓸 것:
+- `var/traces/*.jsonl` — OTel GenAI 스팬 (수집 계층의 입력)
+- `GateDecision.to_dict()` — 동기 가드레일의 판정 근거 (P3 탐지 계층과 공유)
+- `var/hitl/*.json` — 승인 큐 (P3 대응 플레이북의 에스컬레이션 대상)
+- `Worker` / `TeamOrchestrator` — 관제 대상 그 자체

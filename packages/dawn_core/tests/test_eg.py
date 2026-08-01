@@ -24,9 +24,13 @@ from dawn_core.eg import bridge as eg_bridge
 from dawn_core.eg.loader import check_references, derive_owned_by, read_seeds
 from dawn_core.paths import Paths
 
-# 설계서(docs/context/02_eg_schema.md §4)가 명시한 시드 규모
+# 설계서(docs/context/02_eg_schema.md §4)가 명시한 시드 규모: 노드 74 · 엣지 136.
+# 엣지가 137 인 이유: P2 에서 `USES_MODEL org:ccc → model:gptoss` 를 추가했다.
+# CCC 는 L3 자산(asset:fw-ips · asset:secrets)을 소유하는데 클라우드 모델만
+# 배정돼 있어 pol:l3-local-only 가 자기 자산 조회를 block 했다 —
+# P1 에서 org:ga 에 있었던 것과 같은 종류의 충돌. 로컬 경로를 열어 해소했다.
 EXPECTED_NODES = 74
-EXPECTED_EDGES = 136
+EXPECTED_EDGES = 137
 
 
 @pytest.fixture(scope="module")
@@ -194,8 +198,17 @@ def test_hr_policies_include_pii_and_local_only(store):
 
 def test_model_routing_differs_per_org(store):
     assert model_for_org(store, "org:aoc-dev")["model"] == "CC Opus"
-    assert model_for_org(store, "org:ccc")["model"] == "CC Sonnet"
     assert "open model" in model_for_org(store, "org:hr")["model"]
+    # org:ccc 는 클라우드(Sonnet) + 로컬(gpt-oss) 둘 다 배정 — L3 경로 확보용
+    ccc = {m.prop("model") for m in org_profile(store, "org:ccc").models}
+    assert "CC Sonnet" in ccc and "gpt-oss:120b" in ccc
+
+
+def test_ccc_has_a_local_path_for_its_l3_assets(store):
+    """CCC 는 L3 자산(방화벽·자격증명)을 소유한다 — 로컬 모델이 없으면
+    pol:l3-local-only 가 자기 자산 조회까지 막는다."""
+    r = model_for_org(store, "org:ccc", touches_l3=True)
+    assert not r["blocked"], "CCC 가 L3 를 만질 때 쓸 모델이 없다"
 
 
 def test_l3_forces_local_model(store):

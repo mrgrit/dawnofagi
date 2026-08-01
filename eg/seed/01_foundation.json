@@ -92,6 +92,7 @@
     {"type": "USES_MODEL", "from": "org:ax-mkt", "to": "model:sonnet"},
     {"type": "USES_MODEL", "from": "org:it-dc", "to": "model:gptoss"},
     {"type": "USES_MODEL", "from": "org:ccc", "to": "model:sonnet"},
+    {"type": "USES_MODEL", "from": "org:ccc", "to": "model:gptoss"},
     {"type": "USES_MODEL", "from": "org:it-support", "to": "model:haiku"},
     {"type": "USES_MODEL", "from": "org:hr", "to": "model:openlocal"},
     {"type": "USES_MODEL", "from": "org:fin", "to": "model:openlocal"},

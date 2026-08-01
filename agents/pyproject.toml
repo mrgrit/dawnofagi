@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dawn-agents"
+version = "0.1.0"
+description = "the dawn of AGI — 에이전트 하네스·워커 루프·행동 게이트 (P2)"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "dawn-core",          # 레지스트리·통제 평면·EG
+  "anthropic>=0.60",    # MIT — Claude API (클라우드 모델)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+dawn-agent = "dawn_agents.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dawn_agents*"]

@@ -20,6 +20,7 @@ ignore = [
   "RUF002",
   "RUF003",
   "SIM108",    # 삼항 강요 — 주석 붙은 if/else 가 더 읽힌다
+  "SIM102",    # 중첩 if 병합 강요 — 게이트 판정처럼 단계가 의미를 갖는 곳이 있다
 ]
 
 [lint.per-file-ignores]
