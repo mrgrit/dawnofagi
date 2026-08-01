@@ -6,7 +6,7 @@
 | # | 상태 | 단계 | 질문 | 차단 여부 |
 |---|---|---|---|---|
 | Q1 | **대기** | P1 | EG 스키마 문서 5종이 없다 (아래 상세) | **P1 차단** |
-| Q2 | 대기 | P0 | GitHub PAT 노출 — 폐기·재발급 필요 | 비차단 |
+| Q2 | 대기 | P0 | GitHub PAT 노출 — 폐기·재발급 필요 (+ `workflow` 스코프) | 비차단 |
 | Q3 | 대기 | P1 | 중간 산출물 Drive 폴더 접근 불가 | P1 부분 차단 |
 | Q4 | 참고 | P0 | el34 Assessor 는 `profiles: [assessor]` 로 기본 미기동 | 해결됨(§Q4) |
 
@@ -46,6 +46,17 @@ P1 DoD 는 "validate.py 오류 0 (**노드 74·엣지 136 규모**)"를 요구�
 
 **권고**: 해당 토큰을 **폐기(revoke)하고 재발급**하라. 대화·로그에 남은 값은 유출된 것으로 간주해야 한다.
 재발급 후에는 `.env` 의 `GITHUB_TOKEN` 으로만 주입한다 (`.env.example` 참조).
+
+현재 토큰은 로컬 credential store(`~/.git-credentials-dawnofagi`, 권한 600, **저장소 밖**)에만 있다.
+
+**재발급 시 `workflow` 스코프를 함께 부여하라.** 현재 토큰에는 없어서
+`.github/workflows/ci.yml` 을 push 할 수 없었다. CI 정의는 `infra/ci/github-actions-ci.yml` 에
+보관돼 있고, 스코프가 생기면:
+
+```bash
+make ci-enable
+git add .github/workflows/ci.yml && git commit -m "[P0][DoD-3] CI 활성화" && git push
+```
 
 ---
 

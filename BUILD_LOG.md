@@ -178,6 +178,27 @@ L2 조사·대응 에이전트가 추가될 때 쓰일 자리다. 의도된 상�
 **하위 문서가 권한을 늘릴 수 없다**는 단조 축소 불변식이 컴파일 단계에서 강제됨을 확인했다.
 원복 후 정상 컴파일도 확인. 이 시나리오는 `scripts/verify-p0.sh` 가 매 실행마다 재현한다.
 
+### §7 — fresh Linux 배포 재현성
+
+깨끗한 clone 에서 `bootstrap.sh` 하나로 전부 서는지 실측했다 (같은 호스트, 새 디렉터리, 새 venv):
+
+```
+$ git clone https://github.com/mrgrit/dawnofagi.git && cd dawnofagi
+$ ./bootstrap.sh --no-el34 --no-docker --no-node --no-sudo
+  …
+  총점 100/100   (합격선 80)   → PASS
+  39 passed in 0.56s
+╭──────────────────────────────────────────────────────────╮
+│  ✔ 부트스트랩 완료                                      │
+╰──────────────────────────────────────────────────────────╯
+
+$ bash scripts/verify-p0.sh --no-el34
+  결과:  10 PASS   0 FAIL   1 SKIP        (SKIP = el34 미연결 환경)
+```
+
+`bootstrap.sh` 는 배포판을 감지해 apt/dnf/yum/pacman 중 맞는 것을 쓰고,
+Node·Docker·el34 단계는 플래그로 끌 수 있다. CI 의 `bootstrap` 잡이 매 PR 마다 이것을 다시 돈다.
+
 ---
 
 ## P0 설계 결정 기록
@@ -204,6 +225,12 @@ P0 는 EG에 의존하지 않으므로 완주했다. P1 착수 전에 [QUESTIONS
 **5. el34 저장소를 수정하지 않았다.**
 Assessor 포트 문제는 우리 쪽 compose 오버라이드로 풀었다. el34 는 별도 제품이고,
 우리가 고치면 그쪽 학생 배포가 깨진다.
+
+**6. CI 정의를 `.github/workflows/` 밖에 둔다.**
+전달받은 PAT 에 `workflow` 스코프가 없어 `.github/workflows/*` 를 push 할 수 없었다.
+CI 를 포기하는 대신 정의를 `infra/ci/github-actions-ci.yml` 에 버전관리하고,
+`make ci-enable` 한 번으로 활성화되게 했다. 스코프를 추가하면 그때 옮기면 된다.
+(→ QUESTIONS.md Q2 의 재발급 시 `workflow` 스코프를 함께 부여할 것)
 
 ---
 
