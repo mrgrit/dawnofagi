@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>the dawn of AGI — 픽셀 오피스</title>
+<style>
+  /* 의존성 0. npm 없음, CDN 없음. dawn-aoc serve 가 이 파일 하나를 준다. */
+  :root{
+    --bg:#0b0f14; --panel:#131a22; --line:#1e2a36; --ink:#d6e2f0; --dim:#7d8fa3;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --crit:#dc2626; --acc:#2ab7a9;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,"D2Coding",Consolas,monospace}
+  #app{display:grid;grid-template-rows:auto 1fr auto;height:100%}
+
+  header{display:flex;align-items:center;gap:14px;padding:8px 14px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:14px;margin:0;letter-spacing:.5px}
+  header h1 b{color:var(--acc)}
+  .crumb{color:var(--dim)}
+  .crumb a{color:var(--acc);cursor:pointer;text-decoration:none}
+  .grow{flex:1}
+  .chip{border:1px solid var(--line);border-radius:3px;padding:2px 7px;color:var(--dim)}
+  .chip b{color:var(--ink)}
+  button{background:#1b2632;color:var(--ink);border:1px solid var(--line);
+    border-radius:3px;padding:4px 9px;cursor:pointer;font:inherit}
+  button:hover{border-color:var(--acc)}
+  button[disabled]{opacity:.4;cursor:default}
+
+  main{display:grid;grid-template-columns:1fr 372px;min-height:0}
+  #stage{position:relative;min-width:0}
+  canvas{display:block;width:100%;height:100%;image-rendering:pixelated;cursor:crosshair}
+  aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:10px 12px}
+
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--dim);
+    margin:14px 0 6px;border-bottom:1px solid var(--line);padding-bottom:3px}
+  h2:first-child{margin-top:0}
+  .kv{display:grid;grid-template-columns:88px 1fr;gap:2px 8px;margin-bottom:2px}
+  .kv span:first-child{color:var(--dim)}
+  .row{padding:5px 0;border-bottom:1px solid #18222c}
+  .row:last-child{border-bottom:0}
+  .muted{color:var(--dim)}
+  .tag{display:inline-block;border:1px solid var(--line);border-radius:3px;
+    padding:0 5px;margin:1px 3px 1px 0;font-size:11px;color:var(--dim)}
+  .tag.pol{border-color:#3b5a7a;color:#8fb6dd}
+  .tag.asset{border-color:#3f5f45;color:#8fd6a1}
+  .sev-critical{color:var(--crit)} .sev-high{color:var(--bad)}
+  .sev-medium{color:var(--warn)} .sev-low{color:var(--ok)}
+  .bar{height:4px;background:#1b2632;border-radius:2px;overflow:hidden;margin-top:3px}
+  .bar i{display:block;height:100%;background:var(--acc)}
+  .bar i.miss{background:var(--bad)}
+  .empty{color:var(--dim);font-style:italic;padding:6px 0}
+
+  footer{border-top:1px solid var(--line);background:var(--panel);padding:6px 14px;
+    display:flex;align-items:center;gap:10px}
+  footer input[type=range]{flex:1;accent-color:var(--acc)}
+  #tl-label{min-width:280px;color:var(--dim)}
+  #legend{position:absolute;left:10px;bottom:10px;background:rgba(11,15,20,.86);
+    border:1px solid var(--line);border-radius:4px;padding:7px 9px;color:var(--dim);font-size:11px}
+  #legend b{color:var(--ink);font-weight:normal}
+  #toast{position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    background:rgba(11,15,20,.92);border:1px solid var(--line);border-radius:4px;
+    padding:5px 11px;color:var(--dim);display:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>the dawn of <b>AGI</b> · 픽셀 오피스</h1>
+    <span class="crumb" id="crumb"></span>
+    <span class="grow"></span>
+    <span class="chip" id="stat-runs">run <b>0</b></span>
+    <span class="chip" id="stat-cases">케이스 <b>0</b></span>
+    <span class="chip" id="stat-gen">—</span>
+    <button id="btn-back">← 위로</button>
+    <button id="btn-reload">새로고침</button>
+  </header>
+
+  <main>
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div id="legend"></div>
+      <div id="toast"></div>
+    </div>
+    <aside id="side"></aside>
+  </main>
+
+  <footer>
+    <button id="tl-play" disabled>▶</button>
+    <input type="range" id="tl" min="0" max="0" value="0" disabled>
+    <span id="tl-label">타임라인 — 에이전트를 클릭하면 그 트레이스를 리플레이한다</span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ────────────────────────────────────────────────────────────────────────
+   픽셀 오피스 — 모든 픽셀이 텔레메트리에 바인딩된다.
+
+   그리는 것은 전부 /api/state 에서 온다. 프론트가 만들어내는 값은 좌표뿐이고,
+   좌표조차 EG 존 순회 결과(agent.zone → zone.pixel_room)로 결정된다.
+   활동이 없으면 없는 대로 비운다 — 장식 애니메이션은 없다.
+
+   3계층: building(4본부=4층) → floor(부서 방) → desk(에이전트 1명)
+   ──────────────────────────────────────────────────────────────────────── */
+
+const S = { state:null, view:"building", div:null, agent:null,
+            spans:[], tl:0, playing:false, hover:null, hit:[] };
+
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const side = document.getElementById("side"), crumb = document.getElementById("crumb");
+const tl = document.getElementById("tl"), tlLabel = document.getElementById("tl-label");
+const tlPlay = document.getElementById("tl-play"), toast = document.getElementById("toast");
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const say = m => { toast.textContent = m; toast.style.display = "block";
+                   clearTimeout(say._t); say._t = setTimeout(()=>toast.style.display="none", 2600); };
+
+/* 존 색 = 민감도 (EG Zone.sensitivity). 임의 팔레트가 아니라 등급 매핑이다. */
+const ZONE_TINT = { "외부/공개":"#3a4a5c", "경유/검사":"#5c4a2a", "내부":"#2f4a3a",
+                    "제한":"#2a4257", "통제":"#4a2f3a" };
+const SEV_COLOR = { critical:"#dc2626", high:"#ef4444", medium:"#f59e0b", low:"#22c55e" };
+const EFFECT = {
+  working:{ ring:"#22c55e", label:"작업" }, idle:{ ring:"#3d4a58", label:"대기" },
+  alert:{ ring:"#ef4444", label:"경보" }, paused:{ ring:"#f59e0b", label:"일시중지" },
+  isolated:{ ring:"#a855f7", label:"격리" }, killed:{ ring:"#dc2626", label:"종료" },
+};
+
+/* ── 로딩 ─────────────────────────────────────────────────────────────── */
+
+async function load(){
+  const r = await fetch("/api/state", {cache:"no-store"});
+  S.state = await r.json();
+  document.getElementById("stat-runs").innerHTML = `run <b>${S.state.runs.length}</b>`;
+  document.getElementById("stat-cases").innerHTML = `케이스 <b>${S.state.cases.length}</b>`;
+  document.getElementById("stat-gen").textContent = S.state.generated_at.replace("T"," ").replace("+00:00","Z");
+  draw();
+}
+
+async function loadTrace(traceId){
+  if(!traceId){ S.spans=[]; resetTimeline(); return; }
+  const r = await fetch("/api/trace/" + encodeURIComponent(traceId));
+  if(!r.ok){ S.spans=[]; resetTimeline(); say("트레이스를 찾지 못했다: "+traceId); return; }
+  S.spans = await r.json();
+  S.tl = S.spans.length;                      // 기본은 끝까지 재생된 상태
+  tl.max = S.spans.length; tl.value = S.tl;
+  tl.disabled = tlPlay.disabled = S.spans.length === 0;
+  renderTimeline();
+}
+
+function resetTimeline(){
+  S.tl = 0; S.playing = false; tlPlay.textContent = "▶";
+  tl.max = 0; tl.value = 0; tl.disabled = tlPlay.disabled = true;
+  tlLabel.textContent = "타임라인 — 에이전트를 클릭하면 그 트레이스를 리플레이한다";
+}
+
+/* ── 캔버스 기본 ──────────────────────────────────────────────────────── */
+
+function fit(){
+  const r = cv.getBoundingClientRect(), dpr = Math.min(devicePixelRatio||1, 2);
+  cv.width = Math.max(1, r.width*dpr); cv.height = Math.max(1, r.height*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {w:r.width, h:r.height};
+}
+const px = (x,y,w,h,c) => { ctx.fillStyle=c; ctx.fillRect(x|0,y|0,w|0,h|0); };
+function frame(x,y,w,h,c,lw=1){ ctx.strokeStyle=c; ctx.lineWidth=lw;
+  ctx.strokeRect((x|0)+.5,(y|0)+.5,(w|0)-1,(h|0)-1); }
+function text(t,x,y,c="#d6e2f0",size=12,align="left",weight=""){
+  ctx.fillStyle=c; ctx.textAlign=align; ctx.textBaseline="middle";
+  ctx.font=`${weight} ${size}px ui-monospace,Menlo,Consolas,monospace`; ctx.fillText(t,x,y);
+}
+
+/* ── 아바타 — 인코딩이 곧 데이터다 ────────────────────────────────────
+   몸색 = 본부(division_color) · 배지 = 모델 · 모자 = 자율화 · 링 = 상태 이펙트
+   머리 위 아이콘 = 참조 중인 EG 노드 (말풍선이 아니라 EG 아이콘)          */
+
+function avatar(a, x, y, scale=1){
+  const s = 4*scale, eff = EFFECT[a.effect] || EFFECT.idle;
+
+  // 상태 링 — 이펙트는 control_state / worst_case 에서 온다
+  ctx.strokeStyle = eff.ring; ctx.lineWidth = Math.max(1, scale);
+  ctx.beginPath(); ctx.arc(x, y+s, s*3.1, 0, Math.PI*2); ctx.stroke();
+  if(a.effect==="isolated" || a.effect==="killed"){          // 격리·종료는 빗금
+    ctx.save(); ctx.globalAlpha=.5; ctx.beginPath();
+    ctx.moveTo(x-s*3,y-s*2); ctx.lineTo(x+s*3,y+s*4); ctx.stroke(); ctx.restore();
+  }
+
+  px(x-s*1.5, y-s*1, s*3, s*3, a.division_color);            // 몸 = 본부색
+  px(x-s*1.0, y-s*2.6, s*2, s*1.6, "#e8c9a8");               // 머리
+  // 모자 = 자율화 등급 (A0 낮음 → A3 높음)
+  const hatH = {A0:0.5, A1:0.9, A2:1.3, A3:1.7}[a.hat] ?? 0.9;
+  const hatC = {A0:"#4b5563", A1:"#2ab7a9", A2:"#3b82f6", A3:"#a855f7"}[a.hat] || "#4b5563";
+  px(x-s*1.2, y-s*(2.6+hatH), s*2.4, s*hatH, hatC);
+
+  if(a.badge){                                               // 배지 = 모델
+    const bc = {OPUS:"#a855f7", SONNET:"#3b82f6", HAIKU:"#22c55e", LOCAL:"#f59e0b"}[a.badge];
+    px(x+s*0.9, y-s*0.6, s*0.9, s*0.9, bc);
+  }
+  if(a.credentials_revoked) px(x-s*2.4, y-s*0.6, s*0.8, s*0.8, "#dc2626");
+
+  if(scale >= 1){
+    text(a.name || a.agent_id, x, y+s*4.6, "#d6e2f0", 11*Math.min(scale,1.4), "center");
+    text(`${a.hat}·${a.badge||"—"}·${eff.label}`, x, y+s*6.1, "#7d8fa3", 10*Math.min(scale,1.3), "center");
+  }
+
+  // EG 아이콘 — 말풍선 대신 참조 중인 EG 노드를 띄운다
+  if(a.eg_refs && a.eg_refs.length){
+    const n = Math.min(a.eg_refs.length, 6), w = s*1.1;
+    a.eg_refs.slice(0,n).forEach((ref,i)=>{
+      const ix = x - (n-1)*w/2 + i*w, iy = y - s*(4.4+hatH);
+      px(ix-w*0.4, iy, w*0.8, w*0.8, ref.startsWith("pol:") ? "#8fb6dd" : "#8fd6a1");
+    });
+  }
+}
+
+/* ── 뷰 1: 빌딩 (4본부 = 4층, 밝기 = 활동량) ─────────────────────────── */
+
+function drawBuilding(w,h){
+  const divs = S.state.divisions;
+  const maxAct = Math.max(1, ...divs.map(d=>d.activity));
+  const pad = 26, top = 54, fh = Math.min(112, (h-top-pad-28)/divs.length);
+
+  text("본부 = 층 · 밝기 = 활동량(스텝 수) · 층을 클릭하면 부서 방으로", pad, 26, "#7d8fa3", 12);
+
+  divs.forEach((d,i)=>{
+    const y = top + i*fh, hh = fh-10;
+    const lit = d.activity / maxAct;
+    ctx.save(); ctx.globalAlpha = 0.16 + lit*0.5;
+    px(pad, y, w-pad*2, hh, d.color); ctx.restore();
+    frame(pad, y, w-pad*2, hh, "#1e2a36");
+    px(pad, y, 5, hh, d.color);
+
+    text(d.name, pad+16, y+18, "#d6e2f0", 14, "left", "bold");
+    text(`zone:${d.zone}  ·  팀 ${d.teams.length}  ·  run ${d.runs}  ·  스텝 ${d.activity}`,
+         pad+16, y+36, "#7d8fa3", 11);
+
+    // 이 층에 실제로 있는 에이전트만 그린다 (없으면 안 그린다)
+    const mine = S.state.agents.filter(a=>a.division===d.division_id);
+    mine.forEach((a,j)=> avatar(a, w-pad-58-j*84, y+hh/2, 0.62));
+    if(!mine.length) text("배치된 에이전트 없음", w-pad-16, y+hh/2, "#4a5967", 11, "right");
+
+    S.hit.push({x:pad, y, w:w-pad*2, h:hh, go:()=>{ S.view="floor"; S.div=d.division_id; draw(); }});
+  });
+
+  text(`창립 ${S.state.divisions.length}본부 · 에이전트 ${S.state.agents.length}명 · ` +
+       `수집 ${S.state.collect.spans} 스팬 / ${S.state.collect.tokens.toLocaleString()} 토큰`,
+       pad, h-16, "#4a5967", 11);
+}
+
+/* ── 뷰 2: 플로어 (존 = el34 세그먼트가 방이다) ──────────────────────── */
+
+function drawFloor(w,h){
+  const d = S.state.divisions.find(x=>x.division_id===S.div);
+  const zones = S.state.zones;
+  const pad = 26, top = 62;
+  const colW = (w-pad*2) / Math.max(1, zones.length);
+
+  text(`${d.name} — 방 = el34 존 (Asset→LOCATED_IN→Zone 순회)`, pad, 26, "#d6e2f0", 14, "left", "bold");
+  text("존 색 = 민감도 · pipe = 존 사이의 문(PEP) · 아바타를 클릭하면 데스크로", pad, 44, "#7d8fa3", 11);
+
+  zones.forEach((z,i)=>{
+    const x = pad + i*colW, zh = h-top-46;
+    px(x+3, top, colW-6, zh, ZONE_TINT[z.sensitivity] || "#26313d");
+    frame(x+3, top, colW-6, zh, z.is_gate ? "#f59e0b" : "#1e2a36", z.is_gate?2:1);
+
+    text(z.pixel_room, x+colW/2, top+16, "#d6e2f0", 12, "center", "bold");
+    text(`${z.cidr}  ${z.security_level}`, x+colW/2, top+32, "#7d8fa3", 10, "center");
+    if(z.is_gate) text("▲ PEP — 통과가 IPS 이벤트로 기록된다", x+colW/2, top+46, "#f59e0b", 10, "center");
+
+    // 자산 = 방 안의 집기. EG 에 있는 것만, 있는 만큼.
+    z.assets.forEach((as,j)=>{
+      const ay = top+62+j*20;
+      if(ay > top+zh-70) return;
+      const irrC = {irreversible:"#dc2626", execute:"#f59e0b", write:"#3b82f6", read:"#4a5967"}[as.irreversibility];
+      px(x+13, ay-5, 8, 10, irrC || "#4a5967");
+      text(as.name.slice(0,Math.max(6,(colW-46)/7)), x+27, ay, "#9fb0c2", 10);
+    });
+
+    // 이 층 소속 + 이 존에 있는 에이전트
+    const here = S.state.agents.filter(a=>a.division===S.div && a.zone===z.short);
+    here.forEach((a,j)=>{
+      const ax = x+colW/2, ay = top+zh-58-j*70;
+      avatar(a, ax, ay, 0.9);
+      S.hit.push({x:ax-26, y:ay-26, w:52, h:64,
+                  go:()=>{ S.view="desk"; S.agent=a.agent_id; loadTrace(a.last_trace); draw(); }});
+    });
+  });
+
+  const others = S.state.agents.filter(a=>a.division===S.div && !zones.some(z=>z.short===a.zone));
+  if(others.length) text(`※ 존 미배정 ${others.length}명 — EG 에 zone 이 없다`, pad, h-16, "#f59e0b", 11);
+}
+
+/* ── 뷰 3: 데스크 (에이전트 1명 — 실행·트레이스·EG 참조) ──────────────── */
+
+function drawDesk(w,h){
+  const a = S.state.agents.find(x=>x.agent_id===S.agent);
+  if(!a){ text("에이전트를 찾을 수 없다", w/2, h/2, "#7d8fa3", 13, "center"); return; }
+  const pad = 26;
+
+  px(pad, 54, w-pad*2, h-100, "#111820"); frame(pad, 54, w-pad*2, h-100, "#1e2a36");
+  text(`${a.name} — ${a.room}`, pad+14, 26, "#d6e2f0", 14, "left", "bold");
+  text(`${a.team} · ${a.eg_org} · ${a.persona}`, pad+14, 44, "#7d8fa3", 11);
+
+  avatar(a, pad+90, 130, 1.7);
+
+  // 리플레이 — 스크러버 위치까지의 스팬만 그린다 (사후 재구성)
+  const shown = S.spans.slice(0, S.tl);
+  const bx = pad+190, by = 92, bw = w-pad*2-206;
+  text("실행 트레이스 (타임라인 스크러버로 되감기)", bx, by-16, "#7d8fa3", 11);
+  if(!S.spans.length){
+    text("이 에이전트의 트레이스가 없다 — 아직 실행한 적이 없다", bx, by+18, "#4a5967", 12);
+  }
+  shown.forEach((s,i)=>{
+    const y = by + i*22;
+    if(y > h-70) return;
+    const at = s.attributes||{};
+    const gate = at["dawn.gate.decision"] || "";
+    const c = s.status==="ERROR" ? "#ef4444"
+            : gate==="block" ? "#dc2626" : gate==="require_hitl" ? "#f59e0b"
+            : i===shown.length-1 ? "#2ab7a9" : "#3d4a58";
+    px(bx, y-6, 5, 13, c);
+    let label = s.name;
+    if(s.name==="execute_tool") label = `${at["gen_ai.tool.name"]||"?"}   gate=${gate||"-"}`;
+    else if(s.name==="chat") label = `chat ${at["gen_ai.request.model"]||""}  ` +
+      `↑${at["gen_ai.usage.input_tokens"]||0} ↓${at["gen_ai.usage.output_tokens"]||0}`;
+    else if(s.name==="invoke_agent") label = `invoke_agent ${at["gen_ai.agent.name"]||""}`;
+    text(label, bx+14, y, i===shown.length-1 ? "#d6e2f0" : "#9fb0c2", 12);
+    text(`${(s.duration_ms||0).toFixed(0)}ms`, bx+bw-8, y, "#4a5967", 11, "right");
+  });
+
+  // 이 에이전트의 케이스 — 있으면 그린다
+  const cs = S.state.cases.filter(c=>c.agent_id===a.agent_id);
+  if(cs.length){
+    text("관제 케이스", pad+14, h-72, "#7d8fa3", 11);
+    cs.slice(0,3).forEach((c,i)=>{
+      text(`[${c.severity}] ${c.title}`, pad+14, h-54+i*16, SEV_COLOR[c.severity]||"#9fb0c2", 11);
+    });
+  }
+}
+
+/* ── 렌더 ─────────────────────────────────────────────────────────────── */
+
+function draw(){
+  if(!S.state) return;
+  const {w,h} = fit();
+  S.hit = [];
+  px(0,0,w,h,"#0b0f14");
+  if(S.view==="building") drawBuilding(w,h);
+  else if(S.view==="floor") drawFloor(w,h);
+  else drawDesk(w,h);
+  renderCrumb(); renderSide(); renderLegend();
+  document.getElementById("btn-back").disabled = S.view==="building";
+}
+
+function renderCrumb(){
+  const d = S.state.divisions.find(x=>x.division_id===S.div);
+  const a = S.state.agents.find(x=>x.agent_id===S.agent);
+  const parts = [`<a onclick="go('building')">빌딩</a>`];
+  if(S.view!=="building" && d) parts.push(`<a onclick="go('floor')">${esc(d.name)}</a>`);
+  if(S.view==="desk" && a) parts.push(esc(a.name));
+  crumb.innerHTML = "› " + parts.join(" › ");
+}
+
+function renderLegend(){
+  const el = document.getElementById("legend");
+  if(S.view==="building"){
+    el.innerHTML = `<b>층</b> = 본부 &nbsp; <b>밝기</b> = 활동량 &nbsp; <b>몸색</b> = 본부`;
+  } else if(S.view==="floor"){
+    el.innerHTML =
+      `<b>방</b> = el34 존 &nbsp; <b>테두리 주황</b> = pipe(PEP) &nbsp;` +
+      `<b>집기</b> = 자산 <span style="color:#dc2626">■</span>비가역` +
+      `<span style="color:#f59e0b">■</span>실행<span style="color:#3b82f6">■</span>쓰기` +
+      `<span style="color:#4a5967">■</span>읽기`;
+  } else {
+    el.innerHTML = `<b>모자</b> = 자율화 &nbsp; <b>배지</b> = 모델 &nbsp; <b>링</b> = 상태 &nbsp;` +
+      `<b>머리 위</b> = EG 참조 <span style="color:#8fb6dd">■</span>정책` +
+      `<span style="color:#8fd6a1">■</span>자산`;
+  }
+}
+
+/* ── 사이드 패널 ──────────────────────────────────────────────────────── */
+
+function renderSide(){
+  const st = S.state;
+  let html = "";
+
+  if(S.view==="desk"){
+    const a = st.agents.find(x=>x.agent_id===S.agent);
+    html += `<h2>에이전트</h2>`;
+    html += kv({ "ID":a.agent_id, "팀":a.team, "EG 조직":a.eg_org, "페르소나":a.persona,
+                 "존/방":`${a.zone} · ${a.room}`, "자율화":a.autonomy +
+                   (a.autonomy!==a.autonomy_declared ? ` (선언 ${a.autonomy_declared})` : ""),
+                 "모델":a.last_model || "—", "제어":a.control_state });
+    if(a.credentials_revoked) html += `<div class="sev-critical">자격증명 회수됨</div>`;
+    if(a.blocked_tools.length) html += `<div class="sev-high">차단 도구: ${esc(a.blocked_tools.join(", "))}</div>`;
+    html += `<h2>실측</h2>` + kv({ "run":a.runs, "완료":a.complete, "토큰":a.tokens.toLocaleString(),
+                                   "케이스":a.cases });
+    html += `<h2>참조 중인 EG 노드</h2>`;
+    html += a.eg_refs.length
+      ? a.eg_refs.map(r=>`<span class="tag ${r.startsWith("pol:")?"pol":"asset"}">${esc(r)}</span>`).join("")
+      : `<div class="empty">없음 — 이 에이전트는 아직 EG 노드를 건드리지 않았다</div>`;
+  }
+
+  html += `<h2>KPI (실측)</h2>`;
+  html += st.kpis.map(k=>{
+    const ok = k.meets_target;
+    const mark = ok===null ? `<span class="muted">표본 없음</span>`
+               : ok ? `<span class="sev-low">충족</span>` : `<span class="sev-high">미달</span>`;
+    const pct = k.target ? Math.min(100, k.direction==="down"
+                  ? (k.value<=k.target?100:100*k.target/Math.max(k.value,.001))
+                  : 100*k.value/k.target) : 0;
+    return `<div class="row"><div>${esc(k.name)} <span class="muted">${k.value.toFixed(1)}${esc(k.unit)}` +
+      (k.target!==null?` / 목표 ${k.direction==="down"?"≤":"≥"}${k.target}${esc(k.unit)}`:``) +
+      `</span> ${mark}</div>` +
+      (k.target!==null?`<div class="bar"><i class="${ok===false?"miss":""}" style="width:${pct}%"></i></div>`:``) +
+      `<div class="muted" style="font-size:11px">n=${k.sample}${k.note?" · "+esc(k.note):""}</div></div>`;
+  }).join("");
+
+  html += `<h2>자율화 검토</h2>`;
+  html += st.autonomy_reviews.map(r=>{
+    const icon = r.demotion ? `<span class="sev-critical">⬇</span>`
+               : r.eligible ? `<span class="sev-low">⬆</span>` : `<span class="muted">=</span>`;
+    return `<div class="row">${icon} ${esc(r.agent_id)} <b>${esc(r.current)}</b>` +
+      (r.proposed?` → ${esc(r.proposed)}`:``) +
+      `<div class="muted" style="font-size:11px">${esc(r.reasons.join(" · ") || "유지")}</div></div>`;
+  }).join("");
+
+  html += `<h2>케이스 (${st.cases.length})</h2>`;
+  html += st.cases.length ? st.cases.map(c=>
+    `<div class="row"><span class="sev-${c.severity}">●</span> ${esc(c.title.slice(0,52))}` +
+    `<div class="muted" style="font-size:11px">${esc(c.agent_id)} · ${esc(c.axis)} · ` +
+    `심각도 ${esc(c.severity_label)}/${c.severity_score} · 권고 ${esc(c.recommended.join(", ")||"-")}</div>` +
+    (c.actions.length ? `<div style="font-size:11px">` + c.actions.map(x=>
+        `${x.executed?"✔":"✋"} ${esc(x.playbook)}`).join(" · ") + `</div>` : ``) +
+    `</div>`).join("")
+    : `<div class="empty">열린 케이스 없음</div>`;
+
+  html += `<h2>제어 상태</h2>`;
+  html += st.control.length ? st.control.map(c=>
+    `<div class="row">${esc(c.agent_id)} <b class="${c.state==="running"?"sev-low":"sev-high"}">${esc(c.state)}</b>` +
+    `<div class="muted" style="font-size:11px">${esc(c.reason||"")}</div></div>`).join("")
+    : `<div class="empty">제어 개입 없음 (전원 running)</div>`;
+
+  html += `<h2>승인 대기 (HITL)</h2>`;
+  html += st.hitl.length ? st.hitl.slice(0,8).map(x=>
+    `<div class="row">${esc(x.skill)} <span class="muted">${esc(x.status)}</span>` +
+    `<div class="muted" style="font-size:11px">${esc(x.agent_id)} · ${esc((x.reasons||[])[0]||"")}</div></div>`).join("")
+    : `<div class="empty">대기 중 승인 없음</div>`;
+
+  side.innerHTML = html;
+}
+
+const kv = o => `<div class="kv">` + Object.entries(o).map(([k,v])=>
+  `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("") + `</div>`;
+
+/* ── 타임라인 스크러버 — 인시던트 사후 재구성 ─────────────────────────── */
+
+function renderTimeline(){
+  if(!S.spans.length){ resetTimeline(); return; }
+  const i = Math.max(0, Math.min(S.tl, S.spans.length)) - 1;
+  if(i < 0){ tlLabel.textContent = `t=0 — 실행 전`; draw(); return; }
+  const s = S.spans[i], t0 = S.spans[0].start_ns;
+  const off = ((s.start_ns - t0)/1e6).toFixed(0);
+  tlLabel.textContent = `+${off}ms  ${s.name}  ${s.status}  (${S.tl}/${S.spans.length})`;
+  draw();
+}
+
+tl.addEventListener("input", ()=>{ S.tl = +tl.value; renderTimeline(); });
+tlPlay.addEventListener("click", ()=>{
+  S.playing = !S.playing; tlPlay.textContent = S.playing ? "⏸" : "▶";
+  if(S.playing && S.tl >= S.spans.length) S.tl = 0;
+  step();
+});
+function step(){
+  if(!S.playing) return;
+  if(S.tl >= S.spans.length){ S.playing=false; tlPlay.textContent="▶"; return; }
+  S.tl++; tl.value = S.tl; renderTimeline();
+  setTimeout(step, 320);          // 재생 속도는 고정. 스팬이 있을 때만 돈다.
+}
+
+/* ── 입력 ─────────────────────────────────────────────────────────────── */
+
+cv.addEventListener("click", e=>{
+  const r = cv.getBoundingClientRect(), x = e.clientX-r.left, y = e.clientY-r.top;
+  for(let i=S.hit.length-1;i>=0;i--){
+    const t = S.hit[i];
+    if(x>=t.x && x<=t.x+t.w && y>=t.y && y<=t.y+t.h){ t.go(); return; }
+  }
+});
+window.go = v => {
+  if(v==="building"){ S.view="building"; S.agent=null; S.spans=[]; resetTimeline(); }
+  if(v==="floor"){ S.view="floor"; S.agent=null; S.spans=[]; resetTimeline(); }
+  draw();
+};
+document.getElementById("btn-back").onclick = ()=> go(S.view==="desk" ? "floor" : "building");
+document.getElementById("btn-reload").onclick = async ()=>{ await load(); say("상태 갱신됨"); };
+addEventListener("resize", draw);
+addEventListener("keydown", e=>{
+  if(e.key==="Escape") document.getElementById("btn-back").click();
+  if(e.key==="ArrowLeft" && !tl.disabled){ S.tl=Math.max(0,S.tl-1); tl.value=S.tl; renderTimeline(); }
+  if(e.key==="ArrowRight" && !tl.disabled){ S.tl=Math.min(S.spans.length,S.tl+1); tl.value=S.tl; renderTimeline(); }
+});
+
+load().catch(e=>{
+  document.getElementById("side").innerHTML =
+    `<h2>상태를 못 읽었다</h2><div class="empty">${esc(e.message)}</div>` +
+    `<div class="muted">dawn-aoc serve 로 띄웠는지 확인하라.</div>`;
+});
+</script>
+</body>
+</html>

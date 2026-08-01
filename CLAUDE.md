@@ -41,8 +41,9 @@ org/                  조직·사업·에이전트 레지스트리 (YAML 매니�
 work/                 L3 — 구조화된 업무 단위 SOP (*_WORK.md)
 eg/                   Experience Graph — 회사의 뇌 (P1)
 agents/               에이전트 하네스·워커 런타임 (P2)
-aoc/                  관제 시스템 (P3)
-apps/                 홈페이지·그룹웨어·픽셀오피스 (P4/P5)
+aoc/                  관제 시스템 — 수집·탐지·트리아지·대응·킬스위치·KPI (P3)
+apps/pixel-office/    픽셀 오피스 관제 콘솔 — index.html 파일 1개, 의존성 0 (P3)
+apps/                 홈페이지·그룹웨어 (P4/P5)
 packages/dawn_core/   공용 라이브러리 — 레지스트리 로더·통제 평면 컴파일러·설정
 infra/                배포·el34 연동 스크립트
 docs/                 참조 문서(context) + 구축 지시문(instructions) + 거버넌스
@@ -58,6 +59,8 @@ make control-lint   # 통제 평면 검증 + Control Readiness Score
 make registry       # 조직·사업 레지스트리 검증 및 요약
 make health         # el34 Assessor 헬스체크
 make check          # lint + test + control-lint + registry (CI와 동일)
+make aoc            # 관제 1회전 — 수집 → 탐지 → 트리아지
+make office         # 픽셀 오피스 관제 콘솔 (localhost:8800)
 ```
 
 ## 진행 상황

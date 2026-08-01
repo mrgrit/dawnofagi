@@ -160,9 +160,24 @@ else
   ok "기존 가상환경 사용 → .venv"
 fi
 ./.venv/bin/python -m pip install -q --upgrade pip setuptools wheel
+# 의존 순서대로: core → agents(하네스) → aoc(관제). 뒤엣것이 앞엣것을 의존한다.
 ./.venv/bin/python -m pip install -q -e "packages/dawn_core[dev]" \
   || die "dawn-core 설치 실패"
-ok "dawn-core $(./.venv/bin/python -c 'import dawn_core;print(dawn_core.__version__)') 설치"
+[[ -d agents ]] && { ./.venv/bin/python -m pip install -q -e "agents[dev]" \
+  || die "dawn-agents 설치 실패"; }
+[[ -d aoc ]] && { ./.venv/bin/python -m pip install -q -e "aoc[dev]" \
+  || die "dawn-aoc 설치 실패"; }
+ok "설치: $(./.venv/bin/python - <<'PY'
+mods = []
+for name in ("dawn_core", "dawn_agents", "dawn_aoc"):
+    try:
+        m = __import__(name)
+        mods.append(f"{name.replace('_', '-')} {getattr(m, '__version__', '?')}")
+    except ImportError:
+        pass
+print(", ".join(mods))
+PY
+)"
 
 # ══ 5. 시크릿 · 환경 ════════════════════════════════════════════════════
 step "시크릿 · 환경 설정"
@@ -238,6 +253,8 @@ cat <<EOF
     make check                lint · test · 통제 평면 · 레지스트리
     dawn registry --tree      조직도
     dawn gate <agent-id>      그 에이전트가 실제로 뭘 할 수 있는지
+    make office               픽셀 오피스 관제 콘솔 (http://localhost:8800)
+    make aoc                  관제 1회전 — 수집 → 탐지 → 트리아지
 
   ${B}읽을 것${Z}
     COMPANY.md                            회사 헌법 (모든 에이전트에 주입됨)

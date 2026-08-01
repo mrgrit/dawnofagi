@@ -47,6 +47,7 @@ make control-lint           # Control Readiness Score — 80점 미만이면 CI 
 ```
 
 자세히: [`docs/governance/CONTROL_PLANE.md`](docs/governance/CONTROL_PLANE.md)
+(사전 통제) · [`docs/governance/AOC_OPERATIONS.md`](docs/governance/AOC_OPERATIONS.md) (사후 관제)
 
 ---
 
@@ -143,14 +144,17 @@ eg/                           Experience Graph — 회사의 뇌
   snapshots/                    주입 스냅샷 (롤백·감사)
 agents/                       에이전트 하네스 · 워커 런타임
   dawn_agents/                  루프 · 행동게이트 · 정책평가 · 라우팅 · HITL · 텔레메트리
-aoc/                          관제 시스템 (수집·탐지·트리아지·대응)     (P3)
-apps/                         홈페이지 · 그룹웨어 · 픽셀오피스          (P4/P5)
+aoc/                          관제 시스템 — AOC 5계층                   (P3)
+  dawn_aoc/                     수집 · 탐지 · 트리아지 · 대응 · 킬스위치 · KPI · 콘솔
+apps/pixel-office/index.html  픽셀 오피스 관제 콘솔 (파일 1개, 의존성 0)  (P3)
+apps/                         홈페이지 · 그룹웨어                       (P4/P5)
 infra/                        배포 · el34 연동
 docs/
   START_HERE.md                 구축 순서 P0→P6
   context/                      참조 문서 (헌장·AOC 아키텍처·조직·스택·컨벤션)
   instructions/                 구축 지시문 P0~P6
-  governance/CONTROL_PLANE.md   통제 평면 사용법
+  governance/CONTROL_PLANE.md   통제 평면 사용법 (미리 막는 법)
+  governance/AOC_OPERATIONS.md  관제 콘솔 운영 (벌어진 뒤 잡는 법)
 BUILD_LOG.md                  진행 기록      QUESTIONS.md  사람에게 묻는 큐
 ```
 
@@ -182,7 +186,7 @@ make health                # 도달성 + 인증 확인
 | **P0** | 부트스트랩 — 모노레포·CI·시크릿·el34 연결·**통제 평면** | ✅ 완료 |
 | **P1** | Experience Graph — 회사의 뇌 (노드 74 · 엣지 136) | ✅ 완료 |
 | **P2** | 에이전트 하네스·루프·행동 게이트 | ✅ 완료 |
-| P3 | AOC 관제 시스템 · 픽셀 오피스 | ⬜ |
+| **P3** | AOC 관제 시스템 · 픽셀 오피스 | ✅ 완료 |
 | P4 | 홈페이지 · 그룹웨어 | ⬜ |
 | P5 | 업무 시스템 (CRM·문서·프로젝트·경리) | ⬜ |
 | P6 | 통합 · 레드팀 검증 · 자사 운영 개시 | ⬜ |
@@ -196,7 +200,7 @@ make health                # 도달성 + 인증 확인
 ```bash
 make help            # 전체 목록
 make check           # lint · test · registry · compile · control-lint · eg-validate · eg-bridge
-make verify          # P0+P1 자기검증 (DoD + 개입·게이트 실증)
+make verify          # P0~P3 자기검증 (DoD + 개입·게이트·관제 실증)
 make secrets         # 저장소 전체 시크릿 스캔
 make bundles         # 통제 평면 번들 생성 → var/control-plane/  (P2 하네스 입력)
 
@@ -205,6 +209,15 @@ make agent-run  A=<id> T="업무"          # 워커 루프 1회 (4단계 + 게�
 make agent-emit E=siem.alert            # 이벤트 → 훅 기동 (상시 폴링 아님)
 make hitl                               # 승인 큐 — 사람이 개입하는 통로
 make trace                              # OTel 스팬 트리
+
+make office                             # 픽셀 오피스 관제 콘솔 → localhost:8800
+make aoc                                # 관제 1회전 — 수집 → 탐지 → 트리아지
+make aoc-judge                          # + LLM-judge (모델 호출, GPU 필요)
+make aoc-cases                          # 관제 케이스 (ID=<case-id> 로 상세)
+make aoc-respond ID=<case-id>           # 대응 플레이북 집행 (비가역은 승인 큐로)
+make aoc-control                        # 킬 스위치 — 에이전트가 못 건드리는 계층
+make aoc-kpi                            # KPI + 자율화 등급 검토
+make aoc-replay T=<trace-id>            # 타임라인 리플레이 (사후 재구성)
 ```
 
 ---

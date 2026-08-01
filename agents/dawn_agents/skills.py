@@ -267,7 +267,9 @@ def build_default_registry(catalog, *, root: Path, eg_store=None) -> SkillRegist
         files = sorted(d.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
         return SkillResult(True, "\n".join(f.name for f in files), meta={"count": len(files)})
 
-    reg.register("sec.trace_query", trace_query)
+    # 트레이스 레이크 = 수집 계층의 자산(asset:assessor). 자산을 선언하지 않으면
+    # 관제가 이 실행을 어느 존에 그려야 할지 모른다 — 아바타가 허공에 뜬다.
+    reg.register("sec.trace_query", trace_query, touches=["asset:assessor"])
     reg.register("sec.docker_inspect", None, touches=["asset:bastion"])
     # 비가역 대응 스킬 — 등록만. 실행되면 안 된다.
     for n in ("sec.container_stop", "sec.firewall_change", "sec.credential_revoke", "sec.isolate"):
@@ -346,15 +348,19 @@ def build_default_registry(catalog, *, root: Path, eg_store=None) -> SkillRegist
     reg.register("fin.ledger_write", None, touches=["asset:ledger"])  # 비가역
 
     # ── 절대 금지 (등록만 — 게이트가 이미 deny) ─────────────────────────
-    for n in (
-        "hr.data_read",
-        "comm.external_send",
-        "pay.execute",
-        "ctl.modify_gate",
-        "ctl.modify_kill_switch",
-        "ctl.cross_tenant",
+    #
+    # 실행부가 없어도 **자산은 선언한다.** 게이트가 막은 시도도 관제 케이스가 되고,
+    # 그 심각도는 "무엇을 건드리려 했나"에서 나온다. 자산이 비면 지급 실행 시도가
+    # 원장 기입 시도보다 가볍게 잡힌다 — 거꾸로다.
+    for n, touches in (
+        ("hr.data_read", ["asset:payroll"]),
+        ("comm.external_send", ["asset:mail"]),
+        ("pay.execute", ["asset:payment"]),
+        ("ctl.modify_gate", []),            # 통제 평면 자체 — EG 자산이 아니다
+        ("ctl.modify_kill_switch", []),
+        ("ctl.cross_tenant", []),
     ):
-        reg.register(n, None)
+        reg.register(n, None, touches=touches)
 
     return reg
 

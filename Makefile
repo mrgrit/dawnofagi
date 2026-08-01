@@ -25,16 +25,16 @@ hooks:  ## git 훅 재설치 (gitleaks 포함)
 # ══ 품질 ════════════════════════════════════════════════════════════════
 .PHONY: lint
 lint:  ## ruff lint
-	@$(PY) -m ruff check packages infra scripts eg agents
+	@$(PY) -m ruff check packages infra scripts eg agents aoc
 
 .PHONY: fmt
 fmt:  ## ruff format (수정)
-	@$(PY) -m ruff format packages infra eg agents scripts
-	@$(PY) -m ruff check --fix packages infra scripts eg agents
+	@$(PY) -m ruff format packages infra eg agents scripts aoc
+	@$(PY) -m ruff check --fix packages infra scripts eg agents aoc
 
 .PHONY: test
 test:  ## pytest
-	@$(PY) -m pytest packages agents -q
+	@$(PY) -m pytest packages agents aoc -q
 
 # ══ 레지스트리 · 통제 평면 ══════════════════════════════════════════════
 .PHONY: registry
@@ -164,15 +164,51 @@ ci-enable:  ## CI 활성화 — infra/ci/*.yml → .github/workflows/ (PAT 에 w
 	@echo "→ .github/workflows/ci.yml 생성. git add & commit & push 하라."
 	@echo "  push 가 거부되면 PAT 에 'workflow' 스코프를 추가하라 (infra/ci/README.md)."
 
+# ══ 관제 (P3 — AOC) ═════════════════════════════════════════════════════
+.PHONY: aoc
+aoc:  ## 관제 1회전 — 수집 → 탐지 → 트리아지 (케이스 생성)
+	@$(PY) -m dawn_aoc.cli collect
+	@$(PY) -m dawn_aoc.cli scan
+
+.PHONY: aoc-judge
+aoc-judge:  ## 관제 1회전 + LLM-judge (모델 호출 — GPU 필요)
+	@$(PY) -m dawn_aoc.cli scan --judge
+
+.PHONY: aoc-cases
+aoc-cases:  ## 관제 케이스 목록 — make aoc-cases ID=<case-id> 로 상세
+	@$(PY) -m dawn_aoc.cli cases $(ID)
+
+.PHONY: aoc-respond
+aoc-respond:  ## 대응 플레이북 집행 — make aoc-respond ID=<case-id> [PB=pause,isolate]
+	@test -n "$(ID)" || { echo "사용법: make aoc-respond ID=<case-id>"; exit 2; }
+	@$(PY) -m dawn_aoc.cli respond $(ID) $(if $(PB),--playbooks $(PB),)
+
+.PHONY: aoc-control
+aoc-control:  ## 킬 스위치 상태 (에이전트가 수정 불가한 별도 계층)
+	@$(PY) -m dawn_aoc.cli control
+
+.PHONY: aoc-kpi
+aoc-kpi:  ## KPI 대시보드 + 자율화 등급 검토
+	@$(PY) -m dawn_aoc.cli kpi
+
+.PHONY: aoc-replay
+aoc-replay:  ## 타임라인 리플레이 — make aoc-replay T=<trace-id>
+	@$(PY) -m dawn_aoc.cli replay $(T)
+
+.PHONY: office
+office:  ## 픽셀 오피스 — http://localhost:8800 (PORT=8800)
+	@$(PY) -m dawn_aoc.cli serve --port $${PORT:-8800}
+
 # ══ 통합 ════════════════════════════════════════════════════════════════
 .PHONY: check
 check: lint test registry compile control-lint eg-validate eg-bridge  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0+P1 자기검증 (DoD + 개입·게이트 실증)
+verify:  ## P0~P3 자기검증 (DoD + 개입·게이트·관제 실증). --live 는 각 스크립트로
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
 	@bash scripts/verify-p2.sh
+	@bash scripts/verify-p3.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔
