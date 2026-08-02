@@ -93,7 +93,15 @@ esac
 command -v cloudflared >/dev/null 2>&1 \
   || die "cloudflared 가 없다. 설치: https 로 .deb 를 받아 dpkg -i (infra/cloudflare/README.md)"
 
-code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$PORT/" || echo 000)
+# curl 은 실패해도 -w 로 "000" 을 찍는다. `|| echo 000` 을 덧붙이면 "000\n000" 이 되어
+# 비교가 깨진다 (실제로 "000000" 이 출력됐다). 폴백은 빈 값일 때만 준다.
+http_code() {
+  local c
+  c=$(curl -s -o /dev/null -w '%{http_code}' --max-time "${2:-5}" "$1" 2>/dev/null)
+  printf '%s' "${c:-000}"
+}
+
+code=$(http_code "http://127.0.0.1:$PORT/")
 [[ "$code" =~ ^(200|30[0-9])$ ]] \
   || die "$NAME(:$PORT) 가 응답하지 않는다 (HTTP $code). 먼저 기동하라 — make web-bg / make office-bg"
 
@@ -139,7 +147,7 @@ echo "$URL" > "$URLF"
 # 터널이 붙는 데 몇 초 걸린다 — 한 번 찔러 보고 000 이면 재시도한다.
 code=000
 for _ in 1 2 3 4 5; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$URL/" 2>/dev/null || echo 000)
+  code=$(http_code "$URL/" 15)
   [[ "$code" != "000" ]] && break
   sleep 3
 done
