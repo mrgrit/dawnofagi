@@ -135,7 +135,7 @@ EG 노드 77→78, 엣지 148→150. `make eg-load && make eg-validate` 오류 0
 
 ---
 
-## Q7 — `eg.search` / `eg.record` 가 자산을 선언하지 않는다 (결정 필요)
+## Q7 — 자산 미선언 도구가 16/35 이고, 페일세이프에 구멍이 있다 (결정 필요)
 
 > **정정.** 처음 이 항목을 적을 때 `sec.trace_query` 가 호출마다 게이트 판정이
 > 갈린다고 썼는데, 확인해 보니 **옛 트레이스였다**. 자산 없는 2건은 08-01 14:55·15:08,
@@ -174,6 +174,48 @@ EG 노드 77→78, 엣지 148→150. `make eg-load && make eg-validate` 오류 0
 3. **EG DB 를 존에 두지 않는다** — 모든 에이전트가 상시 읽는 공용 인프라(DNS 같은)로
    보고 `LOCATED_IN` 을 뗀다. 그러면 "선언 누락"이 아니라 "존에 없는 자산"이 된다.
 
-**같이 정할 것**: `org/tools.yaml` 에 도구별 `touches:` 를 선언하고 하네스가 호출
-경로와 무관하게 그 값을 싣게 할지. 그러면 자산 선언이 등록 코드가 아니라 **카탈로그**
-에서 나오고, 이런 누락이 `make registry` 에서 잡힌다.
+### 개별 건이 아니라 구조 문제였다 (추가 조사)
+
+등록된 스킬을 전부 세어 봤다: **35개 중 16개가 자산 미선언.** eg 둘만이 아니었다.
+
+```
+ctl.cross_tenant  ctl.modify_gate  ctl.modify_kill_switch      ← 통제 평면 자체
+sys.deploy  sys.mkfs  sys.rm_rf_root  sys.run_command          ← 파괴적
+dev.dependency_add  dev.git  dev.tests                         ← asset:source 여야
+net.fetch  net.web_search                                      ← asset:web-search/public-api 여야
+eg.record  eg.search                                           ← asset:eg-db 여야
+skill.preview  skill.run                                       ← 메타 도구. 자산 없는 게 맞다
+```
+
+### 페일세이프 구멍
+
+심각도 = 행동 비가역성 × 자산 등급이다. **자산을 하나도 선언 안 하면 계산할 게
+없어서 0 이 된다.** 실측:
+
+```
+도구                  위험   선언 자산            심각도       판정
+sys.rm_rf_root       HIGH  (없음)              0  낮음     block
+ctl.modify_gate      HIGH  (없음)              0  낮음     block
+sec.container_stop   HIGH  ['asset:fw-ips']    6  최고     block
+```
+
+"미분류 자산은 최고 등급으로 친다"는 페일세이프는 있는데, **아예 선언 안 한 경우**는
+거기 안 걸린다. 회사에서 가장 위험한 도구들이 심각도 0 이다.
+
+**실제 파급**: `triage.py` 의 `if case.severity_score >= 6` 이 **`revoke_credentials`**
+플레이북을 여는 조건이다. 자산 미선언 도구는 이 문턱을 **절대 못 넘는다.**
+에이전트가 자기 게이트를 고치려 시도해도(`ctl.modify_gate`) 자격증명 회수 권고가
+뜨지 않는다. deny 리스트가 실행은 막지만 **심각도가 거짓말을 한다.**
+
+### 제안 (4단계, 1~3 은 판정 불변 / 4 는 재계산)
+
+1. `org/tools.yaml` 에 도구별 `touches:` 선언 — **카탈로그가 권위**가 된다.
+2. 스킬 등록 시 카탈로그의 touches 를 자동 적용 — 등록 코드가 빠뜨려도 채워진다.
+3. `make registry` 가 touches 없는 도구를 실패로 잡는다 (`skill.*` 처럼 자산이 없는
+   게 맞는 메타 도구는 카탈로그에 명시적으로 면제 표시).
+4. **페일세이프 구멍 메우기** — 자산이 하나도 없으면 0 이 아니라 위험도 기반
+   최소값을 준다 (HIGH·destructive → 최고 등급 취급). 선언을 다 채워도 미래에 또
+   빠질 수 있으니 **계산 쪽에서** 막아야 한다.
+
+1~3 은 게이트 판정을 안 바꾼다(자산 선언이 늘어도 deny 는 그대로). **4 는 기존
+케이스 심각도와 KPI 를 재계산시킨다** — 그래서 여기서 멈추고 묻는다.
