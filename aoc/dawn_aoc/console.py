@@ -158,7 +158,20 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         a["busy_ms"] = round(sum(s["end_ns"] - s["start_ns"] for s in mine) / 1e6, 1)
         a["sectors"] = sorted({s["zone"] for s in mine if s["kind"] == "work"})
 
-    kpis = kpi_mod.compute(runs, cases, queue, judges)
+    # 판정은 디스크에서 읽는다 — 상태 조립이 모델을 부르면 화면 열 때마다 돈이 나간다
+    from .detect import JudgeStore
+
+    jstore = JudgeStore(root)
+    saved = jstore.all()
+    judgements = {tid: d for tid, d in saved.items() if d.get("purpose") == "work"}
+    for a in agents:
+        mine = sorted(
+            (d for d in judgements.values() if d.get("agent_id") == a["agent_id"]),
+            key=lambda d: d.get("judged_at", ""), reverse=True)
+        a["quality"] = mine[0] if mine else None
+        a["judged"] = len(mine)
+
+    kpis = kpi_mod.compute(runs, cases, queue, judges or jstore.results())
     reviews = [
         kpi_mod.review_autonomy(a["agent_id"], a["autonomy_declared"], kpis, cases)
         for a in agents
@@ -173,6 +186,7 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         "floorplan": _floorplan(divisions, zones, agents, occupancy, runs, cases,
                                 queue, reg),
         "occupancy": occupancy,
+        "judgements": judgements,
         "window": _window(occupancy),
         "agents": agents,
         "runs": [r.to_dict() for r in runs[:80]],
@@ -555,8 +569,17 @@ def write_state(root: Path, **kw) -> Path:
 # ── 파이프라인 — 수집 → 탐지 → 트리아지 (대응은 별도 호출) ──────────────
 
 
-def scan(root: Path, *, with_judge: bool = False, limit: int = 50) -> dict[str, Any]:
-    """관제 1회전. 새 케이스를 만들고 저장한다."""
+def scan(root: Path, *, with_judge: bool | None = None, limit: int = 50) -> dict[str, Any]:
+    """관제 1회전. 새 케이스를 만들고 저장한다.
+
+    **판정(judge)은 실업무 run 에 대해 기본으로 돈다.** 품질 축의 목적은 게이트가
+    못 잡는 "조용히 잘못한 것"을 잡는 것이라, 이상이 잡힌 run 만 보면 취지에 어긋난다.
+    드릴·레드팀은 판정하지 않는다 — 일부러 실패하는 실행을 채점해 봐야 의미가 없고
+    할루시네이션율만 오염된다.
+
+    같은 run 은 두 번 판정하지 않는다 (`JudgeStore.has`). 판정 결과는 디스크에
+    남고, `build_state` 는 **읽기만** 한다 — 화면을 열 때마다 모델을 부르면 안 된다.
+    """
     reg = Registry.load(root)
     db = eg_db_path(reg.paths)
     eg = EGStore(db) if db.is_file() else None
@@ -566,12 +589,18 @@ def scan(root: Path, *, with_judge: bool = False, limit: int = 50) -> dict[str, 
     store = CaseStore(root)
     existing = {c.trace_id + "|" + c.agent_id for c in store.list()}
 
+    from .detect import JudgeStore
+
+    jstore = JudgeStore(root)
     new_cases, judged = [], {}
     for r in runs:
         dets = list(anomalies(r))
         dets += action_gate_from_run(r).detections
 
-        if with_judge and r.chat_calls and not r.is_orchestrator:
+        # 판정 대상: 실업무 · 모델을 부른 run · 아직 판정 안 한 것.
+        # with_judge 를 명시하면 그 값이 이긴다 (강제 재판정·전면 중단 둘 다 가능).
+        want = r.purpose == "work" if with_judge is None else with_judge
+        if want and r.chat_calls and not r.is_orchestrator and not jstore.has(r.trace_id):
             from .detect import judge
 
             task, out = _task_and_output(r)
@@ -579,6 +608,8 @@ def scan(root: Path, *, with_judge: bool = False, limit: int = 50) -> dict[str, 
                 jr = judge(task or (r.agent_name or r.agent_id), out,
                            watched_policy_id=r.model_policy, eg_store=eg)
                 judged[r.trace_id] = jr
+                jstore.save(r.trace_id, jr, agent_id=r.agent_id, purpose=r.purpose,
+                            at=kpi_mod.now_iso())
                 dets += judge_to_detections(r, jr)
 
         if not dets:

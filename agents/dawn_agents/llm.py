@@ -31,6 +31,9 @@ MODEL_MAP: dict[str, tuple[str, str]] = {
     "model:haiku": ("anthropic", "claude-haiku-4-5"),
     "model:gptoss": ("ollama", "$LOCAL_LLM_MODEL"),
     "model:openlocal": ("ollama", "$LOCAL_LLM_MODEL"),
+    # 판정 전용 — 피감시 모델과 **다른 모델**이어야 한다 (담합 방지).
+    # 같은 env 를 쓰면 자기 채점이 되므로 별도 키다.
+    "model:judge": ("ollama", "$LOCAL_JUDGE_MODEL"),
 }
 
 CLOUD_PROVIDERS = {"anthropic"}
@@ -173,6 +176,10 @@ class LLMClient:
             "system": system,
             "prompt": prompt,
             "stream": False,
+            # 추론(thinking) 모델은 생각에 토큰을 다 쓰고 본문을 못 내는 경우가 있다.
+            # 실제로 judge 가 빈 응답을 받아 "판정 불가"로 떨어졌다(2026-08-02).
+            # 우리가 쓰는 건 결론이므로 생각 출력은 끈다 — 지원 안 하는 모델은 무시한다.
+            "think": False,
             "options": {"num_predict": max_tokens},
         }
         req = urllib.request.Request(

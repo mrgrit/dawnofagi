@@ -1,7 +1,7 @@
 """dawn-aoc — 관제 콘솔 CLI.
 
     dawn-aoc collect            수집·정규화 (스팬 → run), PII 재검증
-    dawn-aoc scan [--judge]     탐지 → 트리아지 → 케이스 생성
+    dawn-aoc scan               탐지 → 트리아지 → 케이스 (실업무는 judge 자동)
     dawn-aoc cases              케이스 목록
     dawn-aoc respond <case-id>  대응 플레이북 집행 (비가역은 승인 큐로)
     dawn-aoc control            킬 스위치 상태 / pause·kill·isolate·resume
@@ -68,7 +68,9 @@ def cmd_collect(args) -> int:
 
 
 def cmd_scan(args) -> int:
-    res = console_mod.scan(_root(), with_judge=args.judge, limit=args.limit)
+    # 기본은 자동 — 실업무 run 만, 아직 판정 안 한 것만 (console.scan 참조).
+    force = True if args.judge else (False if args.no_judge else None)
+    res = console_mod.scan(_root(), with_judge=force, limit=args.limit)
     if args.json:
         out = {k: v for k, v in res.items() if not k.startswith("_")}
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -377,7 +379,10 @@ def build_parser() -> argparse.ArgumentParser:
     x.set_defaults(func=cmd_collect)
 
     x = s.add_parser("scan", help="탐지 → 트리아지")
-    x.add_argument("--judge", action="store_true", help="LLM-judge 까지 (모델 호출)")
+    x.add_argument("--judge", action="store_true",
+                   help="드릴·레드팀까지 전부 판정 (기본은 실업무만 자동 판정)")
+    x.add_argument("--no-judge", action="store_true",
+                   help="판정 끄기 (모델 호출 없이 탐지·트리아지만)")
     x.add_argument("--limit", type=int, default=50)
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_scan)

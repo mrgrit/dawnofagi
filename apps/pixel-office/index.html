@@ -783,6 +783,7 @@ function drawPeople(lv, alpha){
 
     person(ctx, a, pt.x, pt.y, s);
     if(S.cam.z > 0.55){
+      qualityBar(a.quality, pt.x - 11*S.cam.z, pt.y + 14*S.cam.z, 22*S.cam.z, 5*S.cam.z);
       label(a.name || a.agent_id, { x:pt.x, y:pt.y + 9*S.cam.z }, "#cfdcea", 10.5*S.cam.z);
       const seg = p.seg;
       const doing = seg ? (seg.kind === "work"
@@ -816,6 +817,13 @@ function agentTip(a, p){
          "<br><i>" + hhms(seg.start_ns) + " → " + hhms(seg.end_ns) + "</i>";
   } else {
     s += "<i>진행 중인 스팬이 없다 — 대기실</i>";
+  }
+  if(a.quality){
+    s += "<br><i>품질(judge " + esc(a.quality.judge_model || "") + ") " +
+         QUALITY.axes.map(([k,ko]) => ko + " " + (a.quality[k]||0)).join(" · ") +
+         " · " + esc(a.quality.verdict || "") + "</i>";
+  } else if(a.runs){
+    s += "<br><i>품질 판정 없음 — 실업무 run 이 아직 판정되지 않았다</i>";
   }
   return s;
 }
@@ -879,10 +887,10 @@ function drawFloor(w, h){
 function floorHud(lv, w){
   const f = S.state.floorplan.floors[lv.level], wk = f.work, au = f.authority;
   const bx = 14, by = 12, bw = Math.min(560, w-28);
-  ctx.fillStyle = "rgba(13,20,27,.9)"; ctx.fillRect(bx, by, bw, 62);
+  ctx.fillStyle = "rgba(13,20,27,.9)"; ctx.fillRect(bx, by, bw, 79);
   ctx.strokeStyle = "#1e2a36"; ctx.lineWidth = 1;
-  ctx.strokeRect(bx+.5, by+.5, bw-1, 61);
-  ctx.fillStyle = f.color; ctx.fillRect(bx, by, 4, 62);
+  ctx.strokeRect(bx+.5, by+.5, bw-1, 78);
+  ctx.fillStyle = f.color; ctx.fillRect(bx, by, 4, 79);
 
   label(f.name + "  F" + (lv.level+1), {x:bx+14, y:by+16}, "#d6e2f0", 13, "left", "bold");
   label("업무  실업무 " + wk.work_runs + "/" + wk.runs + "run · 완료 " + wk.complete +
@@ -897,9 +905,27 @@ function floorHud(lv, w){
     label(t, {x, y:by+51}, GATE_C[k], 11, "left");
     x += t.length*7 + 12;
   });
-  const perm = "권한  실효 " + au.effective_union.length + "종 · 공통 deny " +
+  const perm = "권한  실효 " + au.effective_union.length + "종 · deny " +
                au.deny_common.length + "종 · 최대 민감도 " + (au.max_sensitivity || "—");
   label(perm, {x:Math.max(x+8, bx+230), y:by+51}, "#7d8fa3", 11, "left");
+
+  // 품질 — 권한·업무와 나란히 놓는다. 이 층 실업무 판정의 평균이다.
+  const judged = S.state.agents.filter(a => a.division === f.division_id && a.quality);
+  const avg = k => judged.length
+    ? Math.round(judged.reduce((s2,a) => s2 + Number(a.quality[k]||0), 0) / judged.length) : 0;
+  let qx = bx+14;
+  label("품질", {x:qx, y:by+68}, "#9fb0c2", 11, "left"); qx += 32;
+  if(judged.length){
+    QUALITY.axes.forEach(([k,ko]) => {
+      const v = avg(k);
+      label(ko + " " + v, {x:qx, y:by+68}, qcolor(v), 11, "left");
+      qx += (ko.length*11 + String(v).length*7 + 14);
+    });
+    label("판정 " + judged.length + "명", {x:qx, y:by+68}, "#5d6d7e", 11, "left");
+  } else {
+    label("판정 없음 — 실업무 run 이 아직 판정되지 않았다",
+          {x:qx, y:by+68}, "#5d6d7e", 11, "left");
+  }
   if(wk.blocked.length)
     label("차단 " + wk.blocked.join(" "), {x:bx+bw-12, y:by+16}, GATE_C.block, 11, "right");
 }
@@ -965,6 +991,11 @@ function assetPiece(as, gx, gy){
 const KIND_LABEL = { system:"서버랙", data:"캐비닛", tool:"워크벤치", mcp:"터미널" };
 /* run 의 목적 — KPI 는 실업무만 센다. 드릴·레드팀은 일부러 막혀 ④ 에 도달하지
    않으므로 같이 세면 "잘 막혔다"가 "일을 못 한다"로 뒤집혀 읽힌다. */
+/* 품질 3축 — LLM-judge 가 감시 대상과 **다른 모델**로 매긴다(담합 방지).
+   근거(groundedness) · 완결성(completeness) · 경로(trajectory), 0~100.
+   70 미만이면 fail 로 친다 (JudgeResult.failed 와 같은 기준). */
+const QUALITY = { axes:[["groundedness","근거"], ["completeness","완결"], ["trajectory","경로"]],
+                  pass:"#22c55e", warn:"#f59e0b", fail:"#ef4444", none:"#3d4a58" };
 const PURPOSE = { work:{ label:"실업무", c:"#22c55e" }, drill:{ label:"드릴", c:"#3b82f6" },
                   redteam:{ label:"레드팀", c:"#ef4444" }, demo:{ label:"시연", c:"#a855f7" },
                   unknown:{ label:"미태그", c:"#5d6d7e" } };
@@ -1142,6 +1173,18 @@ function drawDesk(w, h){
   label(a.name || a.agent_id, {x:x0,y:y0}, "#d6e2f0", 14, "left", "bold");
   label(a.team + " · " + a.eg_org + " · " + a.room, {x:x0,y:y0+18}, "#7d8fa3", 11, "left");
   person(ctx, a, x0+40, y0+140, 7, {flat:false});
+  if(a.quality){
+    qualityBar(a.quality, x0+14, y0+160, 54, 8);
+    label(QUALITY.axes.map(([k,ko]) => ko + " " + (a.quality[k]||0)).join(" "),
+          {x:x0+14, y:y0+178}, "#9fb0c2", 10, "left");
+    label("judge " + (a.quality.judge_model || "") + " · " + (a.quality.verdict || ""),
+          {x:x0+14, y:y0+192}, a.quality.verdict === "pass" ? QUALITY.pass : QUALITY.fail,
+          10, "left");
+    (a.quality.issues || []).slice(0,3).forEach((s2,i) =>
+      label("· " + String(s2).slice(0,40), {x:x0+14, y:y0+208+i*13}, "#e5a0a0", 10, "left"));
+  } else {
+    label("품질 판정 없음", {x:x0+14, y:y0+178}, "#5d6d7e", 10, "left");
+  }
 
   const bx = x0+100, by = y0+44;
   label("실행 트레이스 — 오피스 시계까지 벌어진 일", {x:bx,y:by-12}, "#7d8fa3", 11, "left");
@@ -1248,6 +1291,21 @@ function renderLegend(){
 
 /* 층 상세 — 업무(실제로 돌아간 것)와 권한(할 수 있는 것)을 나란히 놓는다.
    둘을 떼어 놓으면 "권한은 있는데 안 쓴다 / 쓰는데 아슬아슬하다"가 안 보인다. */
+
+const qcolor = v => v >= 90 ? QUALITY.pass : v >= 70 ? QUALITY.warn : QUALITY.fail;
+
+/* 품질 막대 3칸 — 자율화 모자·모델 명찰 옆에 붙는 세 번째 인코딩 축이다.
+   권한(무엇에 손댈 수 있나)과 나란히 품질(제대로 했나)이 보여야 한다. */
+function qualityBar(q, x, y, w, h){
+  if(!q){ ctx.fillStyle = QUALITY.none; ctx.fillRect(x, y, w, h); return; }
+  const each = w/3;
+  QUALITY.axes.forEach(([k], i) => {
+    const v = Number(q[k] || 0);
+    ctx.fillStyle = "#1b2632"; ctx.fillRect(x + i*each, y, each-1, h);
+    ctx.fillStyle = qcolor(v);
+    ctx.fillRect(x + i*each, y + h*(1 - clamp(v,0,100)/100), each-1, h*clamp(v,0,100)/100);
+  });
+}
 
 const gcls = g => g === "block" ? "g-block" : g === "require_hitl" ? "g-hitl" : "g-log";
 const gateSpan = obj => Object.entries(obj || {}).sort()
@@ -1436,6 +1494,29 @@ function renderFloorDetail(){
       " · 스텝 " + r.steps + " · " + esc(r.tools.join(" → ") || "도구 없음") +
       "</div></div>").join("") + "</details>";
 
+  // ── 품질 ────────────────────────────────────────────────────────────
+  h += "<h2>품질 — 시킨 대로·원칙대로 했나</h2>";
+  const jd = S.state.agents.filter(a => a.division === f.division_id && a.quality);
+  h += '<div class="lead">LLM-judge 가 <b>감시 대상과 다른 모델</b>로 매긴다(담합 방지). ' +
+       "실업무 run 만 판정한다 — 드릴·레드팀은 일부러 실패하므로 채점 대상이 아니다.</div>";
+  h += jd.length ? jd.map(a => {
+    const q = a.quality;
+    return '<div class="card"><h3>' + esc(a.name) +
+      ' <span class="tag" style="color:' + (q.verdict === "pass" ? QUALITY.pass : QUALITY.fail) +
+      '">' + esc(q.verdict || "?") + "</span></h3>" +
+      '<div class="sub">judge ' + esc(q.judge_model || "") + " · 판정 " + a.judged + "회</div>" +
+      QUALITY.axes.map(([k,ko]) =>
+        '<div class="row" style="padding:2px 0">' + ko + ' <span class="muted">' +
+        (q[k]||0) + '</span><div class="bar"><i style="width:' + clamp(q[k]||0,0,100) +
+        "%;background:" + qcolor(q[k]||0) + '"></i></div></div>').join("") +
+      ((q.issues||[]).length
+        ? '<div class="lead">지적</div>' +
+          q.issues.map(x => '<div class="muted" style="font-size:11px">· ' + esc(x) + "</div>").join("")
+        : "");
+  }).join("")
+    : '<div class="empty">판정된 실업무 run 이 없다 — <code>dawn-aoc scan</code> 이 ' +
+      "실업무를 돌 때 자동으로 판정한다</div>";
+
   // ── 권한 ────────────────────────────────────────────────────────────
   h += "<h2>권한 — 통제 평면이 정한 실효 경계</h2>";
   h += '<div class="lead">L1 COMPANY → L2 팀 → L3 업무 → L4 SOUL 을 겹쳐 병합한 값이다.' +
@@ -1517,7 +1598,11 @@ function renderSide(){
       '<div class="nm">' + esc(a.name || a.agent_id) +
       ' <span style="color:' + eff.ring + '">●</span></div>' +
       '<div class="sub">' + esc(a.team) + " · " + esc(a.autonomy) + " · " +
-      esc(a.badge || "—") + "</div>" +
+      esc(a.badge || "—") +
+      (a.quality
+        ? QUALITY.axes.map(([k]) => '<span style="color:' + qcolor(a.quality[k]||0) +
+            '">●</span>').join("")
+        : '<span class="muted"> ○○○</span>') + "</div>" +
       '<div class="at">' + where + "</div></div></div>";
   }).join("");
 

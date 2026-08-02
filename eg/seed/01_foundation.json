@@ -131,6 +131,12 @@
       "rationale": "민감 로그·데이터주권. bastion 기존 운영. 사내 GPU 서버(ollama) — 접속정보는 .env 의 LOCAL_LLM_BASE_URL"
     },
     {
+      "id": "model:judge",
+      "model": "사내 GPU 판정 모델 (피감시 모델과 다른 계열)",
+      "cost_tier": "local",
+      "rationale": "LLM-judge 전용. 감시 대상과 **실제로 다른 모델**이어야 담합이 아니다 — model:gptoss 와 model:openlocal 은 정책 id 만 다르고 둘 다 $LOCAL_LLM_MODEL 로 풀려서 모델이 자기 산출물을 채점했다(2026-08-02 발견). 업무용으로는 배정하지 않는다. 엔드포인트·모델명은 .env 의 LOCAL_JUDGE_MODEL"
+    },
+    {
       "id": "model:openlocal",
       "model": "사내 GPU open model",
       "cost_tier": "local",

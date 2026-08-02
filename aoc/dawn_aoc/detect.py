@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from dawn_agents import llm as llm_mod
@@ -334,17 +336,40 @@ class JudgeResult:
         return self.__dict__.copy()
 
 
+def _resolved_model(policy_id: str) -> str:
+    """이 정책이 **실제로** 부르는 모델. 정책 id 가 달라도 같은 모델일 수 있다."""
+    try:
+        r = llm_mod.resolve(policy_id, touches_l3=True)
+        return f"{r.provider}/{r.model}"
+    except Exception:
+        return ""
+
+
 def pick_judge_model(watched_policy_id: str, eg_store) -> str:
-    """피감시 모델과 다른 ModelPolicy 를 고른다 (담합 방지)."""
+    """피감시 모델과 다른 ModelPolicy 를 고른다 (담합 방지).
+
+    **정책 id 가 다른 것으로는 부족하다.** `model:openlocal` 과 `model:gptoss` 는
+    서로 다른 정책이지만 둘 다 `ollama/gpt-oss:120b` 로 풀린다 — 그러면 모델이
+    자기 산출물을 채점하게 되고, 그건 감사가 아니다. 실제로 그런 판정이 한 번
+    나갔다(2026-08-02). 그래서 **풀린 모델까지 비교**한다.
+    """
     if eg_store is None:
         return "model:gptoss"
+    watched_model = _resolved_model(watched_policy_id)
     candidates = [
         n.id for n in eg_store.nodes(type="ModelPolicy") if n.id != watched_policy_id
     ]
     # 로컬을 선호한다 — 판정 대상에 L3 가 섞여 있을 수 있다
     local = [c for c in candidates
              if (eg_store.node(c) or None) and eg_store.node(c).prop("cost_tier") == "local"]
-    return (local or candidates or ["model:gptoss"])[0]
+    ordered = local + [c for c in candidates if c not in local]
+    # 실제로 다른 모델로 풀리는 것을 먼저 쓴다. 하나도 없으면 첫 후보를 돌려주고
+    # judge() 가 담합으로 거절한다 — 조용히 자기 채점하게 두지 않는다.
+    for c in ordered:
+        rm = _resolved_model(c)
+        if rm and watched_model and rm != watched_model:
+            return c
+    return (ordered or ["model:gptoss"])[0]
 
 
 def extract_json(text: str) -> dict[str, Any] | None:
@@ -406,6 +431,13 @@ def judge(
     if policy == watched_policy_id:
         res.error = "판정 모델이 피감시 모델과 같다 — 담합 위험"
         return res
+    # 정책이 달라도 **같은 모델로 풀리면** 자기 채점이다. 판정을 내지 않는다 —
+    # 틀린 점수보다 "판정 못 했다"가 낫다 (verdict=unknown 은 탐지를 만들지 않는다).
+    same = _resolved_model(policy)
+    if same and same == _resolved_model(watched_policy_id):
+        res.error = (f"판정 모델이 피감시 모델과 실제로 같다 ({same}) — 담합 위험. "
+                     "EG 에 다른 모델을 쓰는 ModelPolicy 를 추가하라")
+        return res
     try:
         resolved = llm_mod.resolve(policy, touches_l3=True)   # 산출물에 L3 가 섞일 수 있다
         comp = (client or llm_mod.LLMClient()).complete(
@@ -453,3 +485,47 @@ def judge_to_detections(run, jr: JudgeResult) -> list[Detection]:
                 trace_id=run.trace_id, agent_id=run.agent_id, framework=fw,
             ))
     return out
+
+
+class JudgeStore:
+    """판정 저장소 — `var/aoc/judge/<trace_id>.json`.
+
+    **판정은 모델 호출이다.** `/api/state` 는 요청마다 불리므로 거기서 판정하면
+    화면을 열 때마다 돈이 나가고 느려진다. 그래서 `scan` 이 한 번 판정해 여기 쓰고,
+    상태 조립은 **읽기만** 한다. 같은 run 을 두 번 판정하지도 않는다.
+    """
+
+    def __init__(self, root) -> None:
+        self.dir = Path(root) / "var" / "aoc" / "judge"
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def has(self, trace_id: str) -> bool:
+        return (self.dir / f"{trace_id}.json").is_file()
+
+    def save(self, trace_id: str, jr: JudgeResult, *, agent_id: str = "",
+             purpose: str = "", at: str = "") -> None:
+        d = jr.to_dict()
+        d.pop("raw", None)               # 원문은 트레이스에 이미 있다 — 두 번 저장 안 한다
+        d.update({"trace_id": trace_id, "agent_id": agent_id,
+                  "purpose": purpose, "judged_at": at})
+        (self.dir / f"{trace_id}.json").write_text(
+            json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def all(self) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for p in sorted(self.dir.glob("*.json")):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if d.get("trace_id"):
+                out[d["trace_id"]] = d
+        return out
+
+    def results(self) -> dict[str, JudgeResult]:
+        """KPI 가 먹는 형태 — 저장된 dict 를 JudgeResult 로 되돌린다."""
+        fields = set(JudgeResult.__annotations__)
+        return {
+            tid: JudgeResult(**{k: v for k, v in d.items() if k in fields})
+            for tid, d in self.all().items()
+        }

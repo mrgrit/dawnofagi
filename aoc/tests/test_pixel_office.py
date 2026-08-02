@@ -62,6 +62,7 @@ AGENT_FIELDS = {
     "division_color", "badge", "hat", "effect", "autonomy", "autonomy_declared",
     "control_state", "credentials_revoked", "blocked_tools", "runs", "complete",
     "tokens", "cases", "last_model", "eg_refs", "last_trace", "busy_ms", "sectors",
+    "quality", "judged",
 }
 
 
@@ -302,7 +303,7 @@ def test_only_encoding_tables_are_hardcoded(html):
     consts = set(re.findall(r"const\s+([A-Z][A-Z0-9_]*)\s*=", body))
     assert consts <= {"G", "ZONE_TINT", "SEV_COLOR", "EFFECT", "HAT", "MODEL_C",
                       "IRR_C", "GATE_C", "KIND_FURN", "HAIR", "SKIN", "ACCENT",
-                      "KIND_LABEL", "PURPOSE", "SPEEDS", "SPEED_NAME", "S"}, \
+                      "KIND_LABEL", "PURPOSE", "QUALITY", "SPEEDS", "SPEED_NAME", "S"}, \
         f"인코딩 표가 아닌 상수: {sorted(consts)}"
     # S 는 런타임 홀더다 — **비어서 시작해야** 한다. 초기값에 데이터가 있으면 픽스처다.
     m = re.search(r"const\s+S\s*=\s*\{(.*?)\};", body, re.S)

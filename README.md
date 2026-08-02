@@ -51,6 +51,30 @@ make control-lint           # Control Readiness Score — 80점 미만이면 CI 
 
 ---
 
+## 픽셀 오피스 — 회사가 지금 무엇을 하고 있는지
+
+```bash
+make office-bg      # → http://<호스트 IP>:8800
+```
+
+아이소메트릭 사옥 한 채가 회사다. **네 단계**로 파고든다:
+사옥(전 층) → 층(본부) → 방(존)/부서 자리(팀) → 사람(실행 트레이스).
+
+**세 축이 동시에 보인다.**
+
+| 축 | 무엇으로 보이나 |
+|---|---|
+| **권한** — 무엇에 손댈 수 있나 | 방(존)·집기(자산)·게시판(실효 경계). 사람이 만지는 집기와 선으로 이어진다 |
+| **업무** — 실제로 무엇이 돌았나 | 도구 호출·게이트 판정·진입 기록. 시계는 **스팬 시각** 단위로 밟는다 |
+| **품질** — 시킨 대로·원칙대로 했나 | 발밑 품질 막대 3칸 (근거·완결·경로). LLM-judge 가 **다른 모델**로 매긴다 |
+
+**사람이 어디 서 있는가 = 그 순간 무엇을 했는가.** 소속으로 세우지 않는다:
+게이트를 지나 자산을 만졌으면 그 방 안, 아니면 자기 자리, 스팬이 없으면 휴게실.
+
+자세히: [`docs/governance/AOC_OPERATIONS.md`](docs/governance/AOC_OPERATIONS.md)
+
+---
+
 ## EG — 회사의 뇌 (또 하나의 손잡이)
 
 통제 평면이 *어떻게 행동하는가*(문서)라면, EG 는 *무엇을 아는가*(그래프)다.
@@ -134,7 +158,8 @@ org/                          조직·사업·에이전트 레지스트리 (YAML
   businesses/                   사업 — 새 사업은 여기 YAML 추가만으로 편입
   divisions/                    본부/팀 + AGENT_TEAM.md(L2) + gate.yaml
   agents/                       에이전트 + SOUL.md(L4)
-  tools.yaml                    도구 카탈로그 (namespace.action + 위험도)
+  tools.yaml                    도구 카탈로그 — 위험도·비가역성·**만지는 자산(touches)**
+                                touches 미선언은 로드가 거부한다 (심각도 0 방지)
 work/                         L3 — 재사용 가능한 업무 SOP (*_WORK.md)
 packages/dawn_core/           레지스트리 로더 · 게이트 병합 · 통제 평면 컴파일러 · 린터
 eg/                           Experience Graph — 회사의 뇌
@@ -146,7 +171,8 @@ agents/                       에이전트 하네스 · 워커 런타임
   dawn_agents/                  루프 · 행동게이트 · 정책평가 · 라우팅 · HITL · 텔레메트리
 aoc/                          관제 시스템 — AOC 5계층                   (P3)
   dawn_aoc/                     수집 · 탐지 · 트리아지 · 대응 · 킬스위치 · KPI · 콘솔
-apps/pixel-office/index.html  픽셀 오피스 관제 콘솔 (파일 1개, 의존성 0)  (P3)
+apps/pixel-office/index.html  픽셀 오피스 — 3D 사옥 (파일 1개, 의존성 0)     (P3)
+scripts/office-preview.py     브라우저 없는 서버에서 화면을 PNG 로 (선택)
 apps/groupware/               공개 홈페이지 + 사내 그룹웨어              (P4)
   dawn_groupware/               인증·조직권한 · 승인 관문 · EG 조정 UI · 감사
 apps/website/                 공개 홈페이지 정적 자산                    (P4)
@@ -174,9 +200,9 @@ el34 는 4-tier 세그먼트 보안 실습/운영 인프라이자 **이 회사�
 
 | 존 | CIDR | 주요 자산 |
 |---|---|---|
-| ext | 10.20.30.0/24 | bastion, attacker |
+| ext | 10.20.30.0/24 | bastion, attacker, **공개 홈페이지(대고객 창구)** |
 | pipe | 10.20.31.0/24 | fw, ips — 존 사이의 문(PEP) |
-| dmz | 10.20.32.0/24 | web, Wazuh SIEM, portal, **Assessor** |
+| dmz | 10.20.32.0/24 | web, Wazuh SIEM, **사내 그룹웨어**, EG DB, CRM, **Assessor** |
 | int | 10.20.40.0/24 | 취약 웹(고객 모사), DB |
 | user | 10.20.33.0/24 | Windows 엔드포인트 |
 
@@ -192,7 +218,7 @@ make health                # 도달성 + 인증 확인
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | **P0** | 부트스트랩 — 모노레포·CI·시크릿·el34 연결·**통제 평면** | ✅ 완료 |
-| **P1** | Experience Graph — 회사의 뇌 (노드 74 · 엣지 136) | ✅ 완료 |
+| **P1** | Experience Graph — 회사의 뇌 (노드 79 · 엣지 150) | ✅ 완료 |
 | **P2** | 에이전트 하네스·루프·행동 게이트 | ✅ 완료 |
 | **P3** | AOC 관제 시스템 · 픽셀 오피스 | ✅ 완료 |
 | **P4** | 홈페이지 · 그룹웨어 | ✅ 완료 |
@@ -220,8 +246,9 @@ make trace                              # OTel 스팬 트리
 
 make office-bg                          # 픽셀 오피스 관제 콘솔 (백그라운드) → http://<호스트 IP>:8800
 make office-stop                        # 콘솔 중지
-make aoc                                # 관제 1회전 — 수집 → 탐지 → 트리아지
-make aoc-judge                          # + LLM-judge (모델 호출, GPU 필요)
+make office-preview                     # 화면을 PNG 로 (브라우저 없는 서버용, quickjs·pillow 필요)
+make aoc                                # 관제 1회전 — 수집 → 탐지 → 트리아지 (실업무는 judge 자동)
+make aoc-judge                          # 드릴·레드팀까지 전부 판정 (평소엔 불필요)
 make aoc-cases                          # 관제 케이스 (ID=<case-id> 로 상세)
 make aoc-respond ID=<case-id>           # 대응 플레이북 집행 (비가역은 승인 큐로)
 make aoc-control                        # 킬 스위치 — 에이전트가 못 건드리는 계층

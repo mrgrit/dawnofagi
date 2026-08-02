@@ -503,3 +503,35 @@ def test_scan_does_not_duplicate_cases(repo_root, tmp_path, monkeypatch):
     scan(repo_root, with_judge=False, limit=20)
     after = len(CaseStore(repo_root).list())
     assert after == mid >= before
+
+
+def test_judge_refuses_to_grade_itself(eg):
+    """정책 id 가 달라도 **같은 모델로 풀리면** 자기 채점이다 — 감사가 아니다.
+
+    실제로 `model:gptoss` 와 `model:openlocal` 이 둘 다 `$LOCAL_LLM_MODEL` 로 풀려
+    모델이 자기 산출물에 55점을 매긴 적이 있다 (2026-08-02).
+    """
+    from dawn_aoc.detect import _resolved_model, pick_judge_model
+
+    for watched in ("model:openlocal", "model:gptoss"):
+        picked = pick_judge_model(watched, eg)
+        assert picked != watched
+        wm, pm = _resolved_model(watched), _resolved_model(picked)
+        if wm and pm:
+            assert pm != wm, f"{watched} 를 {picked} 로 판정하는데 둘 다 {wm} 이다"
+
+
+def test_judge_store_round_trips(tmp_path):
+    """판정은 모델 호출이다 — 한 번 하고 저장한다. /api/state 가 모델을 부르면 안 된다."""
+    from dawn_aoc.detect import JudgeResult, JudgeStore
+
+    s = JudgeStore(tmp_path)
+    assert not s.has("t1")
+    s.save("t1", JudgeResult(groundedness=55, completeness=85, trajectory=80,
+                             verdict="fail", judge_model="model:judge"),
+           agent_id=CORP, purpose="work", at="2026-08-02T00:00:00+00:00")
+    assert s.has("t1")
+    d = s.all()["t1"]
+    assert d["groundedness"] == 55 and d["purpose"] == "work"
+    assert "raw" not in d, "원문은 트레이스에 있다 — 두 번 저장하지 않는다"
+    assert s.results()["t1"].failed

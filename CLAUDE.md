@@ -21,6 +21,7 @@
 | 6 | **공격코드 금지.** 레드팀조차 스코프는 el34 취약웹(`zone:int`) 한정. |
 | 7 | **EG 우선.** 에이전트 행동을 바꿀 땐 코드가 아니라 EG(Persona/Policy)와 통제 평면 문서를 고친다. |
 | 8 | **모호하면 멈춤.** 추측으로 진행하지 말고 `QUESTIONS.md` 에 남긴다. |
+| 9 | **도구는 만지는 자산을 선언한다.** `org/tools.yaml` 의 `touches:` — 빠뜨리면 심각도가 0 으로 계산돼 가장 위험한 도구가 가장 안전해 보인다. 자산이 없는 게 맞으면 `touches: []` 로 명시. |
 
 ## 커밋 규칙
 
@@ -61,8 +62,9 @@ make control-lint   # 통제 평면 검증 + Control Readiness Score
 make registry       # 조직·사업 레지스트리 검증 및 요약
 make health         # el34 Assessor 헬스체크
 make check          # lint + test + control-lint + registry (CI와 동일)
-make aoc            # 관제 1회전 — 수집 → 탐지 → 트리아지
-make office-bg      # 픽셀 오피스 관제 콘솔 (:8800)
+make aoc            # 관제 1회전 — 수집 → 탐지 → 트리아지 (실업무는 judge 자동)
+make office-bg      # 픽셀 오피스 — 3D 사옥 (:8800)
+make office-preview # 화면을 PNG 로 (브라우저 없는 서버용)
 make web-bg         # 홈페이지(:8810) + 그룹웨어(:8811)
 make biz-egcheck    # 업무 데이터 ↔ EG 자산 정합성
 make ops-status     # 전 계층 현황 한 장

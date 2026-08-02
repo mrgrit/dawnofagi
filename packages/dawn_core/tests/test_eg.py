@@ -36,9 +36,13 @@ from dawn_core.paths import Paths
 #       +엣지 2  분리된 두 자산의 LOCATED_IN · CLASSIFIED_AS (portal 것 2개는 사라짐)
 #                공개 홈페이지는 대고객 접점이므로 zone:ext(로비) · sec:L0 로 옮겼다.
 #                하나로 묶여 있어서 "우리 대고객 창구가 어디냐"에 답할 수 없었다.
+#   Q8  +노드 1  model:judge — LLM-judge 전용 ModelPolicy.
+#                model:gptoss 와 model:openlocal 이 정책 id 만 다르고 둘 다
+#                $LOCAL_LLM_MODEL 로 풀려서 **모델이 자기 산출물을 채점**했다.
+#                담합 방지는 정책 id 가 아니라 풀린 모델로 판정해야 한다.
 #
 # 숫자를 그냥 올리지 않는다. 늘었으면 왜 늘었는지가 여기 적혀야 한다.
-EXPECTED_NODES = 78
+EXPECTED_NODES = 79
 EXPECTED_EDGES = 150
 
 
