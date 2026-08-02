@@ -334,35 +334,44 @@ def _sector_work(did: str, short: str, mine: list[dict[str, Any]],
     """
     by_id = {a["agent_id"]: a for a in mine}
     segs = [s for s in occ if s["zone"] == short and s["agent_id"] in by_id]
+    # **방에 들어온 것과 자기 자리에 앉아 있던 것은 다르다.** desk 구간은 자산을
+    # 안 건드린 스팬이라 홈 존으로 떨어질 뿐, 그 방에 들어간 적은 없다. 섞어서
+    # 세면 "이 방에 42번 들어왔다"처럼 없던 일이 생긴다.
+    entered = [s for s in segs if s["kind"] == "work"]
+    at_desk = [s for s in segs if s["kind"] == "desk"]
 
-    tools: dict[str, dict[str, Any]] = {}
-    for s in segs:
-        if not s["tool"]:
-            continue
-        meta = catalog.get(s["tool"], {})
-        risk = meta.get("risk", "")
-        t = tools.setdefault(s["tool"], {
-            "tool": s["tool"], "calls": 0, "gate": {}, "risk": risk,
-            "action": meta.get("action") or _ACTION_FALLBACK.get(risk, ""),
-            "destructive": bool(meta.get("destructive", False)),
-        })
-        t["calls"] += 1
-        if s["gate"]:
-            t["gate"][s["gate"]] = t["gate"].get(s["gate"], 0) + 1
+    def _tools(rows):
+        acc: dict[str, dict[str, Any]] = {}
+        for s in rows:
+            if not s["tool"]:
+                continue
+            meta = catalog.get(s["tool"], {})
+            risk = meta.get("risk", "")
+            t = acc.setdefault(s["tool"], {
+                "tool": s["tool"], "calls": 0, "gate": {}, "risk": risk,
+                "action": meta.get("action") or _ACTION_FALLBACK.get(risk, ""),
+                "destructive": bool(meta.get("destructive", False)),
+            })
+            t["calls"] += 1
+            if s["gate"]:
+                t["gate"][s["gate"]] = t["gate"].get(s["gate"], 0) + 1
+        return sorted(acc.values(), key=lambda t: (-t["calls"], t["tool"]))
 
     visitors = []
-    for aid in sorted({s["agent_id"] for s in segs}):
+    for aid in sorted({s["agent_id"] for s in entered}):
         a = by_id[aid]
         visitors.append({
             "agent_id": aid, "name": a["name"], "team": a["team"],
-            "calls": sum(1 for s in segs if s["agent_id"] == aid),
+            "calls": sum(1 for s in entered if s["agent_id"] == aid),
             "works": a["authority"].get("works", []),
         })
     homed = [a for a in mine if a.get("zone") == short]
     return {
-        "tools": sorted(tools.values(), key=lambda t: (-t["calls"], t["tool"])),
+        "tools": _tools(entered),          # 방 안에서 부른 도구
+        "desk_tools": _tools(at_desk),     # 이 존을 홈으로 두고 자기 자리에서 부른 도구
         "visitors": visitors,
-        "entries": len(segs),
+        "entries": len(entered),           # 실제 진입 횟수 (desk 는 세지 않는다)
+        "desk_spans": len(at_desk),
         "works": sorted({w for v in visitors for w in v["works"]}
                         | {w for a in homed for w in a["authority"].get("works", [])}),
         "homed": [a["agent_id"] for a in homed],

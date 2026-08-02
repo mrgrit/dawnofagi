@@ -164,14 +164,31 @@ def test_sector_work_separates_telemetry_from_declaration(state):
         for z in f["sectors"]:
             segs = [s for s in state["occupancy"]
                     if s["zone"] == z["short"] and s["agent_id"] in ids]
-            assert z["entries"] == len(segs), f"{f['name']}/{z['short']} 진입 수가 안 맞는다"
+            work = [s for s in segs if s["kind"] == "work"]
+            desk = [s for s in segs if s["kind"] == "desk"]
+            assert z["entries"] == len(work), f"{f['name']}/{z['short']} 진입 수가 안 맞는다"
+            assert z["desk_spans"] == len(desk)
             assert sum(t["calls"] for t in z["tools"]) == \
-                sum(1 for s in segs if s["tool"]), f"{f['name']}/{z['short']} 도구 집계"
-            assert {v["agent_id"] for v in z["visitors"]} == {s["agent_id"] for s in segs}
+                sum(1 for s in work if s["tool"]), f"{f['name']}/{z['short']} 방 도구 집계"
+            assert sum(t["calls"] for t in z["desk_tools"]) == \
+                sum(1 for s in desk if s["tool"]), f"{f['name']}/{z['short']} 자리 도구 집계"
+            assert {v["agent_id"] for v in z["visitors"]} == {s["agent_id"] for s in work}
             # 업무는 들어온·상주 에이전트가 **선언한** SOP 여야 한다 (지어내지 않는다)
             declared = {w for a in state["agents"] if a["agent_id"] in ids
                         for w in a["authority"]["works"]}
             assert set(z["works"]) <= declared, f"{z['short']} 에 없는 업무가 붙었다"
+
+
+def test_desk_spans_are_never_counted_as_room_entries(state):
+    """자기 자리 = 자산을 안 건드린 스팬이다. 진입으로 세면 없던 일이 생긴다."""
+    seen_desk_only = False
+    for f in state["floorplan"]["floors"]:
+        for z in f["sectors"]:
+            if z["desk_spans"] and not z["entries"]:
+                seen_desk_only = True
+                assert not z["visitors"], f"{z['short']}: 아무도 안 들어왔는데 방문자가 있다"
+                assert not z["tools"], f"{z['short']}: 진입 0 인데 방 안 도구가 있다"
+    assert seen_desk_only, "자기 자리 스팬만 있는 존이 없다 — 이 검증이 무의미하다"
 
 
 AUTH_FIELDS = {"allow", "deny", "effective", "declared", "autonomy", "hitl_require_on",

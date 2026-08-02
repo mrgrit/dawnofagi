@@ -659,7 +659,8 @@ function drawSectors(lv, alpha){
               9.5*Math.max(.9, S.cam.z));
     });
     if(detail() && z.assets.length)
-      label("자산 " + z.assets.length + (z.entries ? " · 진입 " + z.entries + "회" : ""),
+      label("자산 " + z.assets.length + (z.entries ? " · 진입 " + z.entries + "회" : "") +
+            (z.desk_spans ? " · 자리 " + z.desk_spans : ""),
             P(sc.x+sc.w/2, sc.y+sc.d-0.15, lv.level, 1), "#59697a", 9*S.cam.z);
 
     if(!z.used)
@@ -987,6 +988,16 @@ const toolTags = (list, cls, max) => (list || []).length
      ((list.length > (max||40)) ? '<span class="muted">+' + (list.length-(max||40)) + "</span>" : ""))
   : '<span class="muted">없음</span>';
 
+const toolTable = rows => rows.length
+  ? '<table class="tbl"><tr><th>도구</th><th class="n">호출</th><th>행동</th>' +
+    "<th>게이트</th></tr>" + rows.map(t =>
+      '<tr class="' + (t.destructive ? "hot" : "") + '"><td>' + esc(t.tool) + "</td>" +
+      '<td class="n">' + t.calls + "</td>" +
+      '<td style="color:' + (IRR_C[t.action] || "#9fb0c2") + '">' + esc(t.action || "?") +
+      (t.destructive ? '<br><span class="sev-critical">비가역</span>' : "") + "</td>" +
+      "<td>" + gateSpan(t.gate) + "</td></tr>").join("") + "</table>"
+  : '<div class="empty">호출 없음</div>';
+
 function renderFloorDetail(){
   const idx = levelByDiv(S.div);
   const f = S.state.floorplan.floors[idx];
@@ -1008,7 +1019,9 @@ function renderFloorDetail(){
       h += "<h2>" + esc(z.pixel_room) + (z.used ? "" : " <span class='muted'>· 미사용</span>") +
            "</h2>";
       h += kv({ "존": z.short, "대역": z.cidr, "보안등급": z.security_level,
-                "민감도": z.sensitivity, "이 층에서 진입": z.entries + "회",
+                "민감도": z.sensitivity,
+                "방에 들어온 횟수": z.entries + "회",
+                "자기 자리 스팬": z.desk_spans + "건",
                 "상주 팀": (z.teams||[]).join(", ") || "없음",
                 "상주 에이전트": (z.homed||[]).join(", ") || "없음" });
       if(!z.used)
@@ -1017,28 +1030,26 @@ function renderFloorDetail(){
 
       h += "<h2>이 방의 업무</h2>";
       h += z.works.length
-        ? '<div class="lead">여기 들어온 에이전트가 맡은 L3 업무 SOP 다 (선언 기준 — ' +
-          "어느 호출이 어느 SOP 였는지는 스팬에 없다).</div>" +
+        ? '<div class="lead">여기 들어왔거나 이 존에 상주하는 에이전트가 맡은 L3 업무 ' +
+          "SOP 다 (선언 기준 — 어느 호출이 어느 SOP 였는지는 스팬에 없다).</div>" +
           z.works.map(w => '<span class="tag pol">' + esc(w) + "</span>").join("")
         : '<div class="empty">이 방에서 도는 업무가 없다</div>';
 
-      h += '<div class="lead">여기서 실제로 부른 도구 (텔레메트리)</div>';
-      h += z.tools.length
-        ? '<table class="tbl"><tr><th>도구</th><th class="n">호출</th><th>행동</th>' +
-          "<th>게이트</th></tr>" + z.tools.map(t =>
-            '<tr class="' + (t.destructive ? "hot" : "") + '"><td>' + esc(t.tool) + "</td>" +
-            '<td class="n">' + t.calls + "</td>" +
-            '<td style="color:' + (IRR_C[t.action] || "#9fb0c2") + '">' + esc(t.action || "?") +
-            (t.destructive ? '<br><span class="sev-critical">비가역</span>' : "") + "</td>" +
-            "<td>" + gateSpan(t.gate) + "</td></tr>").join("") + "</table>"
-        : '<div class="empty">호출 없음</div>';
+      h += '<div class="lead">방 안에서 부른 도구 — 자산을 실제로 만졌다</div>';
+      h += toolTable(z.tools);
 
-      h += '<div class="lead">드나든 사람</div>';
+      h += '<div class="lead">자기 자리에서 부른 도구 — 이 존을 홈으로 두지만' +
+           " 자산은 안 건드린 스팬이다 (chat·eg 조회 등). 방에 들어온 게 아니다.</div>";
+      h += toolTable(z.desk_tools);
+
+      h += '<div class="lead">방에 들어온 사람</div>';
       h += z.visitors.length ? z.visitors.map(v => '<div class="row">' + esc(v.name) +
         " <span class='muted'>" + v.calls + "회</span>" +
         '<div class="muted" style="font-size:11px">' + esc(v.team) + " · " +
         esc(v.works.join(", ") || "업무 미선언") + "</div></div>").join("")
-        : '<div class="empty">아무도 들어오지 않았다</div>';
+        : '<div class="empty">아무도 들어오지 않았다' +
+          (z.desk_spans ? " (자기 자리 스팬 " + z.desk_spans + "건은 진입이 아니다)" : "") +
+          "</div>";
 
       h += '<div class="lead">방 안의 집기 = EG 자산 · 색 = 비가역성</div>';
       h += '<table class="tbl"><tr><th>자산</th><th>종류</th><th>비가역성</th></tr>' +
@@ -1095,7 +1106,8 @@ function renderFloorDetail(){
       "<h3>" + esc(z.pixel_room) + ' <span class="tag">' + esc(z.security_level) + "</span>" +
       (z.used ? "" : ' <span class="muted">미사용</span>') + "</h3>" +
       '<div class="sub">' + esc(z.sensitivity) + " · " + esc(z.cidr) +
-      " · 자산 " + z.assets.length + " · 진입 " + z.entries + "회</div>" +
+      " · 자산 " + z.assets.length + " · 진입 " + z.entries + "회" +
+      (z.desk_spans ? " · 자기 자리 " + z.desk_spans : "") + "</div>" +
       (z.works.length
         ? '<div style="margin-top:3px">' +
           z.works.map(w => '<span class="tag pol">' + esc(w) + "</span>").join("") + "</div>"
