@@ -168,8 +168,8 @@
 
 /* 격자·층 치수. STEP 은 층 하나의 아이소 높이((Δx+Δy)·TH/2)보다 커야 한다 —
    작으면 위층이 아래층 뒷부분을 덮어 방이 사라진다. */
-const G = { TW:44, TH:8, SW:5.2, SD:5, COR:1.8, GAP:1.2, TEAM:3, TEAMD:3.4, TROW:4,
-            LOUNGE:6.5, CORE:2.4, STEP:206, WALL:34, SPEED:26, THF:20 };
+const G = { TW:44, TH:8, SW:4.8, SD:5, COR:1.8, GAP:1.1, TEAM:3, TEAMD:3.4, TROW:4,
+            LOUNGE:6.5, CORE:2.4, STEP:200, WALL:34, SPEED:26, THF:20 };
 /* 빌딩 뷰는 층을 쌓아야 하니 납작하게 본다(TH). 한 층만 볼 땐 쌓을 게 없으니
    카메라를 세워 방이 크게 보이게 한다(THF). 격자 좌표는 그대로다. */
 const thNow = () => S.view === "building" ? G.TH : G.THF;
@@ -598,7 +598,7 @@ function drawLevel(lv, alpha){
         "#8fa3b7", 11*Math.max(.85,S.cam.z));
 
   slab(lv.core.x, G.SD, lv.cols-G.LOUNGE-1.4, G.COR, lv.level, 0.35, "#1d2630", "#28323d");
-  drawSectors(lv);
+  drawSectors(lv, al);
   drawTeams(lv);
   drawLounge(lv);
 
@@ -619,11 +619,13 @@ function drawLevel(lv, alpha){
 }
 
 /* 섹터 = 존. 리스크 등급이 높을수록 칸막이가 높고 색이 진하다. */
-function drawSectors(lv){
+function drawSectors(lv, alpha){
   lv.sectors.forEach((sc,i) => {
     const z = sc.z;
     if(z.is_gate) return;               // pipe 는 방이 아니라 문이다 — drawGate 가 그린다
     const tint = ZONE_TINT[z.sensitivity] || "#26313d";
+    const dim = z.used ? 1 : 0.42;              // 안 쓰는 존 — 빼면 없는 구역처럼 보인다
+    ctx.globalAlpha = (alpha === undefined ? 1 : alpha) * dim;
     const pts = slab(sc.x, sc.y, sc.w, sc.d, lv.level, 0.5, tint, shade(tint,1.45));
     for(let g=1; g<sc.w; g++){                                  // 카펫 눈금
       const a = P(sc.x+g, sc.y, lv.level, 0.5), b = P(sc.x+g, sc.y+sc.d, lv.level, 0.5);
@@ -640,16 +642,30 @@ function drawSectors(lv){
     // 명패 — 방 이름·CIDR·보안등급은 전부 EG Zone 노드에서 온다
     label(z.pixel_room, P(sc.x+sc.w/2, sc.y-0.22, lv.level, wh+22),
           "#cfdcea", 11.5*Math.max(.85,S.cam.z), "center", "bold");
-    if(detail())                       // 카펫에 적는다 (벽 위로 쌓으면 층끼리 겹친다)
-      label(z.cidr + " " + z.security_level, P(sc.x+sc.w*0.5, sc.y+sc.d-0.55, lv.level, 1),
-            "#59697a", 9*S.cam.z);
+    if(detail())
+      label(z.cidr + " " + z.security_level, P(sc.x+sc.w/2, sc.y-0.22, lv.level, wh+2),
+            "#6b7b8c", 9*S.cam.z);
 
-    // 집기 = 자산. 뒷벽을 따라 EG 에 있는 만큼만.
+    // 집기 = 자산. EG 에 있는 만큼만. 이름표는 **고른 방** 또는 충분히 당겼을 때만 —
+    // 다 붙이면 아홉 개짜리 방에서 글자가 서로를 덮어 하나도 안 읽힌다.
+    const named = (S.sel.kind === "sector" && S.sel.id === z.short) || S.cam.z >= 1.15;
     z.assets.forEach((as,j) => {
-      const gx = sc.x + 0.4 + (j%4)*1.4, gy = sc.y + 0.4 + Math.floor(j/4)*1.25;
-      if(gy > sc.y + sc.d - 2.2) return;
-      furniture(as.kind, gx, gy, lv.level, IRR_C[as.irreversibility] || "#5b6b7d");
+      const gx = sc.x + 0.4 + (j%3)*1.5, gy = sc.y + 0.35 + Math.floor(j/3)*1.15;
+      if(gy > sc.y + sc.d - 2.0) return;
+      const c = IRR_C[as.irreversibility] || "#5b6b7d";
+      furniture(as.kind, gx, gy, lv.level, c);
+      if(named)
+        label(as.name, P(gx+0.4, gy+0.75, lv.level, 2 + (j%3)*9), shade(c, 1.55),
+              9.5*Math.max(.9, S.cam.z));
     });
+    if(detail() && z.assets.length)
+      label("자산 " + z.assets.length + (z.entries ? " · 진입 " + z.entries + "회" : ""),
+            P(sc.x+sc.w/2, sc.y+sc.d-0.15, lv.level, 1), "#59697a", 9*S.cam.z);
+
+    if(!z.used)
+      label("미사용", P(sc.x+sc.w/2, sc.y+sc.d/2, lv.level, 8), "#5d6d7e",
+            10*Math.max(.85,S.cam.z));
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
 
     if(i < lv.sectors.length-1) drawGate(lv, sc);
     S.hit.push({ poly:pts, go:()=>{
@@ -989,24 +1005,57 @@ function renderFloorDetail(){
   if(S.sel.kind === "sector"){
     const z = f.sectors.find(s => s.short === S.sel.id);
     if(z){
-      h += "<h2>섹터 " + esc(z.pixel_room) + "</h2>";
+      h += "<h2>" + esc(z.pixel_room) + (z.used ? "" : " <span class='muted'>· 미사용</span>") +
+           "</h2>";
       h += kv({ "존": z.short, "대역": z.cidr, "보안등급": z.security_level,
-                "민감도": z.sensitivity, "이 층에서 진입": z.visits + "회",
-                "담당 팀": (z.teams||[]).join(", ") || "—" });
-      h += '<div class="lead">방 안의 집기 = EG 자산. 색은 비가역성이다.</div>';
+                "민감도": z.sensitivity, "이 층에서 진입": z.entries + "회",
+                "상주 팀": (z.teams||[]).join(", ") || "없음",
+                "상주 에이전트": (z.homed||[]).join(", ") || "없음" });
+      if(!z.used)
+        h += '<div class="lead">이 본부는 아직 이 존을 쓰지 않는다 — 존이 없는 게 아니라' +
+             " 여기서 도는 업무가 없다는 뜻이다.</div>";
+
+      h += "<h2>이 방의 업무</h2>";
+      h += z.works.length
+        ? '<div class="lead">여기 들어온 에이전트가 맡은 L3 업무 SOP 다 (선언 기준 — ' +
+          "어느 호출이 어느 SOP 였는지는 스팬에 없다).</div>" +
+          z.works.map(w => '<span class="tag pol">' + esc(w) + "</span>").join("")
+        : '<div class="empty">이 방에서 도는 업무가 없다</div>';
+
+      h += '<div class="lead">여기서 실제로 부른 도구 (텔레메트리)</div>';
+      h += z.tools.length
+        ? '<table class="tbl"><tr><th>도구</th><th class="n">호출</th><th>행동</th>' +
+          "<th>게이트</th></tr>" + z.tools.map(t =>
+            '<tr class="' + (t.destructive ? "hot" : "") + '"><td>' + esc(t.tool) + "</td>" +
+            '<td class="n">' + t.calls + "</td>" +
+            '<td style="color:' + (IRR_C[t.action] || "#9fb0c2") + '">' + esc(t.action || "?") +
+            (t.destructive ? '<br><span class="sev-critical">비가역</span>' : "") + "</td>" +
+            "<td>" + gateSpan(t.gate) + "</td></tr>").join("") + "</table>"
+        : '<div class="empty">호출 없음</div>';
+
+      h += '<div class="lead">드나든 사람</div>';
+      h += z.visitors.length ? z.visitors.map(v => '<div class="row">' + esc(v.name) +
+        " <span class='muted'>" + v.calls + "회</span>" +
+        '<div class="muted" style="font-size:11px">' + esc(v.team) + " · " +
+        esc(v.works.join(", ") || "업무 미선언") + "</div></div>").join("")
+        : '<div class="empty">아무도 들어오지 않았다</div>';
+
+      h += '<div class="lead">방 안의 집기 = EG 자산 · 색 = 비가역성</div>';
       h += '<table class="tbl"><tr><th>자산</th><th>종류</th><th>비가역성</th></tr>' +
         z.assets.map(as => "<tr><td>" + esc(as.name) + '</td><td class="muted">' +
           esc(as.kind) + '</td><td style="color:' + (IRR_C[as.irreversibility]||"#5b6b7d") + '">' +
           esc(as.irreversibility) + "</td></tr>").join("") + "</table>";
+
       const been = S.state.occupancy.filter(s => s.zone === z.short && s.kind === "work" &&
         f.agents.indexOf(s.agent_id) >= 0);
-      h += '<div class="lead">이 방에 들어온 기록 ' + been.length + "건</div>";
-      h += been.slice(-6).reverse().map(s =>
-        '<div class="row"><span class="jump" onclick="jumpTo(' + s.start_ns + ')">' +
-        hhms(s.start_ns) + "</span> " + esc(s.tool) +
-        ' <span class="' + gcls(s.gate) + '">' + esc(s.gate || "-") + "</span>" +
-        '<div class="muted" style="font-size:11px">' + esc(s.agent_id) + " · " +
-        esc(s.asset) + "</div></div>").join("") || '<div class="empty">기록 없음</div>';
+      h += "<details><summary>진입 기록 " + been.length + "건</summary>" +
+        (been.slice(-10).reverse().map(s =>
+          '<div class="row"><span class="jump" onclick="jumpTo(' + s.start_ns + ')">' +
+          hhms(s.start_ns) + "</span> " + esc(s.tool) +
+          ' <span class="' + gcls(s.gate) + '">' + esc(s.gate || "-") + "</span>" +
+          '<div class="muted" style="font-size:11px">' + esc(s.agent_id) + " · " +
+          esc(s.asset) + "</div></div>").join("") || '<div class="empty">기록 없음</div>') +
+        "</details>";
     }
   }
 
@@ -1036,8 +1085,30 @@ function renderFloorDetail(){
       : '<div class="empty">지금은 전원 근무 중</div>';
   }
 
+  // ── 존별 업무 ───────────────────────────────────────────────────────
+  h += "<h2>존별 업무 (리스크 등급 순)</h2>";
+  h += '<div class="lead">방을 클릭하면 그 존의 도구·사람·자산까지 나온다.</div>';
+  h += f.sectors.map(z => {
+    const on = S.sel.kind === "sector" && S.sel.id === z.short;
+    return '<div class="card' + (on ? " on" : "") + '" onclick="pickSel(\'sector\',\'' +
+      esc(z.short) + '\')" style="cursor:pointer">' +
+      "<h3>" + esc(z.pixel_room) + ' <span class="tag">' + esc(z.security_level) + "</span>" +
+      (z.used ? "" : ' <span class="muted">미사용</span>') + "</h3>" +
+      '<div class="sub">' + esc(z.sensitivity) + " · " + esc(z.cidr) +
+      " · 자산 " + z.assets.length + " · 진입 " + z.entries + "회</div>" +
+      (z.works.length
+        ? '<div style="margin-top:3px">' +
+          z.works.map(w => '<span class="tag pol">' + esc(w) + "</span>").join("") + "</div>"
+        : '<div class="sub">도는 업무 없음</div>') +
+      (z.tools.length
+        ? '<div class="sub" style="margin-top:2px">' + z.tools.slice(0,4).map(t =>
+            esc(t.tool) + " " + t.calls).join(" · ") +
+          (z.tools.length > 4 ? " +" + (z.tools.length-4) : "") + "</div>"
+        : "");
+  }).join("");
+
   // ── 업무 ────────────────────────────────────────────────────────────
-  h += "<h2>업무 — 실제로 돌아간 것</h2>";
+  h += "<h2>층 전체 업무 — 실제로 돌아간 것</h2>";
   h += kv({ "run": wk.runs + " (완료 " + wk.complete + ")",
             "토큰": wk.tokens.toLocaleString(),
             "게이트 판정": "" });
@@ -1119,6 +1190,7 @@ function renderFloorDetail(){
   return h;
 }
 
+window.pickSel = (kind, id) => { S.sel = { kind, id }; draw(); };
 window.jumpTo = ns => {
   if(!S.ev.length) return;
   let i = S.ev.findIndex(e => e >= ns);

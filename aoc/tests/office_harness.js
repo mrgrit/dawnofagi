@@ -81,6 +81,7 @@ function record(view, divId, agentId, clockNs) {
   if (agentId) S.agent = agentId;
   if (clockNs) setClock(clockNs, true);
   if (view === "building") fitCam(); else focusLevel(levelByDiv(S.div));
+  if (typeof SEL === "object" && SEL) S.sel = SEL;
   DL = []; REC = true;
   draw();
   REC = false;
@@ -127,6 +128,7 @@ var PERF_T = 0;
 function setTimeout(fn) { return 0; }
 function clearTimeout() {}
 
+var SEL = null;
 var STATE = __STATE__;
 var TRACE = __TRACE__;
 function fetch(url) {

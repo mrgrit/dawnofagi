@@ -278,7 +278,6 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
     싣는다. 둘을 나란히 놔야 "권한은 있는데 안 쓴다 / 쓰는데 권한이 아슬아슬하다"가
     보인다.
     """
-    by_short = {z["short"]: z for z in zones}
     div_of = {a["agent_id"]: a["division"] for a in agents}
     catalog = reg.tool_catalog.tools
 
@@ -292,13 +291,17 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
     for level, d in enumerate(divisions):
         did = d["division_id"]
         mine = [a for a in agents if a["division"] == did]
+        # **모든 존을 층에 세운다.** 안 쓰는 존을 빼면 그 존이 화면에서 사라져
+        # "우리 회사에 없는 구역"처럼 보인다 — 안 쓴다는 사실 자체가 봐야 할 정보다.
         used = {t["zone"] for t in d["teams"] if t["zone"]}
         used |= {a["zone"] for a in mine if a.get("zone")}
         used |= {z for (dv, z) in visits if dv == did}
         sectors = [
-            {**by_short[z], "visits": visits.get((did, z), 0),
-             "teams": [t["team_id"] for t in d["teams"] if t["zone"] == z]}
-            for z in used if z in by_short and not by_short[z]["is_gate"]
+            {**z, "visits": visits.get((did, z["short"]), 0),
+             "used": z["short"] in used,
+             "teams": [t["team_id"] for t in d["teams"] if t["zone"] == z["short"]],
+             **_sector_work(did, z["short"], mine, occ, catalog)}
+            for z in zones if not z["is_gate"]
         ]
         sectors.sort(key=lambda z: (_sec_rank(z), z["short"]))
 
@@ -316,6 +319,54 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
         "lounge": LOUNGE,
         # pipe = 방이 아니라 섹터 사이의 문. 층마다 섹터 경계에 세운다.
         "gates": [z for z in zones if z["is_gate"]],
+    }
+
+
+def _sector_work(did: str, short: str, mine: list[dict[str, Any]],
+                 occ: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[str, Any]:
+    """이 방에서 **실제로 무슨 업무가 돌았나**.
+
+    두 가지를 구분해서 싣는다 — 섞으면 어느 쪽이 사실인지 알 수 없다:
+
+    * `tools` / `visitors` — 텔레메트리. 실제로 부른 도구와 들어온 사람이다.
+    * `works` — 선언. 여기 들어온 에이전트가 맡은 L3 업무 SOP 다. 어느 호출이
+      어느 SOP 였는지는 스팬에 없으므로 **에이전트 단위로만** 붙인다.
+    """
+    by_id = {a["agent_id"]: a for a in mine}
+    segs = [s for s in occ if s["zone"] == short and s["agent_id"] in by_id]
+
+    tools: dict[str, dict[str, Any]] = {}
+    for s in segs:
+        if not s["tool"]:
+            continue
+        meta = catalog.get(s["tool"], {})
+        risk = meta.get("risk", "")
+        t = tools.setdefault(s["tool"], {
+            "tool": s["tool"], "calls": 0, "gate": {}, "risk": risk,
+            "action": meta.get("action") or _ACTION_FALLBACK.get(risk, ""),
+            "destructive": bool(meta.get("destructive", False)),
+        })
+        t["calls"] += 1
+        if s["gate"]:
+            t["gate"][s["gate"]] = t["gate"].get(s["gate"], 0) + 1
+
+    visitors = []
+    for aid in sorted({s["agent_id"] for s in segs}):
+        a = by_id[aid]
+        visitors.append({
+            "agent_id": aid, "name": a["name"], "team": a["team"],
+            "calls": sum(1 for s in segs if s["agent_id"] == aid),
+            "works": a["authority"].get("works", []),
+        })
+    homed = [a for a in mine if a.get("zone") == short]
+    return {
+        "tools": sorted(tools.values(), key=lambda t: (-t["calls"], t["tool"])),
+        "visitors": visitors,
+        "entries": len(segs),
+        "works": sorted({w for v in visitors for w in v["works"]}
+                        | {w for a in homed for w in a["authority"].get("works", [])}),
+        "homed": [a["agent_id"] for a in homed],
+        "division_id": did,
     }
 
 

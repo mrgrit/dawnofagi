@@ -139,19 +139,39 @@ def test_idle_means_no_span_not_an_empty_desk(html, state):
         "스팬이 없을 때 대기실로 보내는 분기가 없다"
 
 
-def test_floors_only_show_sectors_the_division_actually_uses(state):
-    """안 쓰는 방을 그려 두면 빈 방이 정상인지 장애인지 구분이 안 된다."""
+def test_every_zone_gets_a_room_on_every_floor(state):
+    """존을 빼면 화면에서 사라져 '없는 구역'처럼 보인다 — 안 쓴다는 사실이 봐야 할 정보다."""
     fp = state["floorplan"]
     assert fp["floors"], "층이 없다"
-    shorts = {z["short"] for z in state["zones"]}
+    rooms = {z["short"] for z in state["zones"] if not z["is_gate"]}
     for f in fp["floors"]:
-        assert f["sectors"], f"{f['name']} 에 섹터가 하나도 없다"
+        got = {z["short"] for z in f["sectors"]}
+        assert got == rooms, f"{f['name']} 에 빠진 존: {sorted(rooms - got)}"
         for z in f["sectors"]:
-            assert z["short"] in shorts
             assert not z["is_gate"], "pipe 는 방이 아니라 문이다"
+            assert isinstance(z["used"], bool), "쓰는 존인지 표시가 없다"
+            assert z["used"] or (not z["entries"] and not z["homed"]), \
+                f"{f['name']}/{z['short']} 이 미사용인데 진입·상주 기록이 있다"
         ranks = [int(str(z["security_level"]).split("L")[-1]) for z in f["sectors"]]
         assert ranks == sorted(ranks), f"{f['name']} 섹터가 리스크 순이 아니다"
     assert [g["short"] for g in fp["gates"]] == ["pipe"]
+
+
+def test_sector_work_separates_telemetry_from_declaration(state):
+    """방의 '업무'는 선언, '도구·사람'은 텔레메트리다 — 섞으면 어느 쪽이 사실인지 모른다."""
+    for f in state["floorplan"]["floors"]:
+        ids = set(f["agents"])
+        for z in f["sectors"]:
+            segs = [s for s in state["occupancy"]
+                    if s["zone"] == z["short"] and s["agent_id"] in ids]
+            assert z["entries"] == len(segs), f"{f['name']}/{z['short']} 진입 수가 안 맞는다"
+            assert sum(t["calls"] for t in z["tools"]) == \
+                sum(1 for s in segs if s["tool"]), f"{f['name']}/{z['short']} 도구 집계"
+            assert {v["agent_id"] for v in z["visitors"]} == {s["agent_id"] for s in segs}
+            # 업무는 들어온·상주 에이전트가 **선언한** SOP 여야 한다 (지어내지 않는다)
+            declared = {w for a in state["agents"] if a["agent_id"] in ids
+                        for w in a["authority"]["works"]}
+            assert set(z["works"]) <= declared, f"{z['short']} 에 없는 업무가 붙었다"
 
 
 AUTH_FIELDS = {"allow", "deny", "effective", "declared", "autonomy", "hitl_require_on",
