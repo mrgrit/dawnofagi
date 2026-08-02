@@ -6,11 +6,21 @@
 
 섹터 배정: `Asset -LOCATED_IN-> Zone` 순회로 방을 정한다. pipe = 문(PEP).
 3계층 뷰: 빌딩(4본부=4층) → 플로어(부서별 방) → 데스크(에이전트).
+
+**점유(occupancy)** — 에이전트가 언제 어느 섹터에 있었는지는 추측하지 않는다.
+스팬 하나가 곧 체류 구간 하나다:
+
+* `dawn.assets` 가 있는 스팬 → 그 자산이 `LOCATED_IN` 한 존이 있을 곳이다.
+  자산을 여럿 건드렸으면 **가장 깊은 존**(민감도 높은 쪽)에 있는 것으로 본다.
+* 자산이 없는 스팬(chat·eg.search) → 자기 자리(홈 존)에서 하는 일이다.
+* **스팬이 없는 시각 = 대기실.** 일하지 않는 에이전트를 섹터에 세워 두면
+  "지금 저기서 뭔가 하고 있다"는 거짓말이 된다.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -33,6 +43,13 @@ ZONE_FALLBACK = {
     "int": "Zone 3 · 통제", "pipe": "존 사이의 문",
 }
 ZONE_ORDER = ["ext", "pipe", "user", "dmz", "int"]
+
+# 대기실 — el34 존이 아니다. "진행 중인 스팬이 없다"는 상태 그 자체를 그리는 방.
+LOUNGE = {
+    "id": "lounge",
+    "name": "대기실 · 휴게실",
+    "note": "진행 중인 스팬이 없는 에이전트가 있는 곳 — 업무 중이 아니다",
+}
 
 
 def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> dict[str, Any]:
@@ -119,6 +136,13 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         })[:6]
         a["last_trace"] = mine[0].trace_id if mine else ""
 
+    # ── 점유 = 스팬. 없는 시각은 대기실 ────────────────────────────────
+    occupancy = _occupancy(runs, zones, {a["agent_id"]: a.get("zone", "") for a in agents})
+    for a in agents:
+        mine = [s for s in occupancy if s["agent_id"] == a["agent_id"]]
+        a["busy_ms"] = round(sum(s["end_ns"] - s["start_ns"] for s in mine) / 1e6, 1)
+        a["sectors"] = sorted({s["zone"] for s in mine if s["kind"] == "work"})
+
     kpis = kpi_mod.compute(runs, cases, queue, judges)
     reviews = [
         kpi_mod.review_autonomy(a["agent_id"], a["autonomy_declared"], kpis, cases)
@@ -127,9 +151,13 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
 
     return {
         "generated_at": kpi_mod.now_iso(),
+        "now_ns": time.time_ns(),
         "collect": lake.stats(runs),
         "divisions": divisions,
         "zones": zones,
+        "floorplan": _floorplan(divisions, zones, agents, occupancy),
+        "occupancy": occupancy,
+        "window": _window(occupancy),
         "agents": agents,
         "runs": [r.to_dict() for r in runs[:80]],
         "cases": [c.to_dict() for c in cases],
@@ -138,6 +166,108 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         "control": [asdict(s) for s in ks.all()],
         "hitl": [a.to_dict() for a in queue.list()[:40]],
         "responses": Responder(root).history(30),
+    }
+
+
+def _sec_rank(zone: dict[str, Any]) -> int:
+    """보안등급 숫자. `sec:L2` → 2. 층 안에서 섹터를 리스크 순으로 세우는 기준."""
+    sec = str(zone.get("security_level", ""))
+    return int(sec.split("L")[-1]) if "L" in sec else 9
+
+
+def _occupancy(runs, zones: list[dict[str, Any]],
+               home: dict[str, str]) -> list[dict[str, Any]]:
+    """스팬 → 섹터 체류 구간. **한 줄도 만들어내지 않는다** (스팬 하나 = 구간 하나).
+
+    `dawn.assets` 가 그 스팬이 어느 존에 있었는지를 말해 준다. 자산을 여럿
+    건드렸으면 가장 깊은 존을 택한다 — 낮은 쪽에 세우면 실제보다 안전해 보인다.
+    """
+    asset_zone = {a["id"]: z["short"] for z in zones for a in z["assets"]}
+    depth = {z["short"]: (_sec_rank(z), i) for i, z in enumerate(zones)}
+
+    segs: list[dict[str, Any]] = []
+    for r in runs:
+        if r.is_orchestrator:
+            continue
+        desk = home.get(r.agent_id) or r.zone
+        for s in r.spans:
+            if s.get("name") == "invoke_agent":     # run 을 접는 껍데기 스팬
+                continue
+            at = s.get("attributes") or {}
+            touched = [a for a in str(at.get("dawn.assets", "")).split(",") if a]
+            in_zone = [asset_zone[a] for a in touched if a in asset_zone]
+            zone = max(in_zone, key=lambda z: depth.get(z, (-1, -1))) if in_zone else ""
+            start = int(s.get("start_ns", 0) or 0)
+            segs.append({
+                "agent_id": r.agent_id,
+                "trace_id": r.trace_id,
+                "zone": zone or desk,
+                "kind": "work" if zone else "desk",   # desk = 자기 자리에서 생각·조회
+                "span": str(s.get("name", "")),
+                "tool": str(at.get("gen_ai.tool.name", "")),
+                "asset": next((a for a in touched if asset_zone.get(a) == zone), ""),
+                "gate": str(at.get("dawn.gate.decision", "")),
+                "severity": int(at.get("dawn.severity", 0) or 0),
+                "status": str(s.get("status", "OK")),
+                "start_ns": start,
+                "end_ns": int(s.get("end_ns", 0) or start),
+            })
+    segs.sort(key=lambda x: (x["start_ns"], x["agent_id"]))
+    return segs
+
+
+def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
+               agents: list[dict[str, Any]], occ: list[dict[str, Any]]) -> dict[str, Any]:
+    """빌딩 = 층(본부) × 섹터(존, 리스크 순) + 대기실.
+
+    층에 그리는 섹터는 **그 본부가 실제로 쓰는 존만**이다: 팀 매니페스트가
+    선언한 존 ∪ 에이전트의 홈 존 ∪ 텔레메트리가 실제로 들어간 존. 안 쓰는 방을
+    그려 두면 빈 방이 정상인지 장애인지 구분이 안 된다.
+    """
+    by_short = {z["short"]: z for z in zones}
+    div_of = {a["agent_id"]: a["division"] for a in agents}
+
+    visits: dict[tuple[str, str], int] = {}
+    for s in occ:
+        d = div_of.get(s["agent_id"], "")
+        if d:
+            visits[(d, s["zone"])] = visits.get((d, s["zone"]), 0) + 1
+
+    floors = []
+    for level, d in enumerate(divisions):
+        did = d["division_id"]
+        used = {t["zone"] for t in d["teams"] if t["zone"]}
+        used |= {a["zone"] for a in agents if a["division"] == did and a.get("zone")}
+        used |= {z for (dv, z) in visits if dv == did}
+        sectors = [
+            {**by_short[z], "visits": visits.get((did, z), 0),
+             "teams": [t["team_id"] for t in d["teams"] if t["zone"] == z]}
+            for z in used if z in by_short and not by_short[z]["is_gate"]
+        ]
+        sectors.sort(key=lambda z: (_sec_rank(z), z["short"]))
+        floors.append({
+            "level": level, "division_id": did, "name": d["name"], "color": d["color"],
+            "zone": d["zone"], "runs": d["runs"], "activity": d["activity"],
+            "sectors": sectors,
+            "agents": [a["agent_id"] for a in agents if a["division"] == did],
+        })
+
+    return {
+        "floors": floors,
+        "lounge": LOUNGE,
+        # pipe = 방이 아니라 섹터 사이의 문. 층마다 섹터 경계에 세운다.
+        "gates": [z for z in zones if z["is_gate"]],
+    }
+
+
+def _window(occ: list[dict[str, Any]]) -> dict[str, int]:
+    """오피스 시계가 훑는 구간 — 첫 스팬부터 마지막 스팬까지. 그 밖은 전원 대기실."""
+    if not occ:
+        return {"start_ns": 0, "end_ns": 0, "segments": 0}
+    return {
+        "start_ns": min(s["start_ns"] for s in occ),
+        "end_ns": max(s["end_ns"] for s in occ),
+        "segments": len(occ),
     }
 
 

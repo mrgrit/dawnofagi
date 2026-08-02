@@ -215,6 +215,11 @@ office-bg:  ## 픽셀 오피스 백그라운드 기동 — SSH 를 끊어도 살
 	@cat var/aoc/serve.log
 	@echo "  로그: var/aoc/serve.log   ·  중지: make office-stop"
 
+.PHONY: office-preview
+office-preview:  ## 픽셀 오피스 화면을 PNG 로 (브라우저 없는 서버용 · quickjs·pillow 필요)
+	@$(PY) scripts/office-preview.py --out $${OUT:-var/aoc/preview} \
+	  --view $${VIEW:-building} $${DIV:+--div $(DIV)} $${FRAMES:+--frames $(FRAMES)}
+
 .PHONY: office-stop
 office-stop:  ## 픽셀 오피스 중지
 	@pgrep -f "[d]awn.aoc.* serve" | xargs -r kill 2>/dev/null \

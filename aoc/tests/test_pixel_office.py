@@ -7,6 +7,9 @@
 2. HTML 안에 **에이전트·케이스·run 데이터 리터럴이 없는가** (하드코딩 픽스처 금지).
 3. 외부 의존(CDN·npm·폰트)이 없는가 — fresh linux 에 그대로 배포돼야 한다.
 4. 서버가 상태 API 와 트레이스 API 를 실제로 준다 (리플레이 가능).
+5. **에이전트의 위치가 스팬에서 나오는가** — 사람이 섹터 안에 서 있다는 건
+   "그 시각 거기서 실제로 도구를 썼다"는 뜻이어야 한다. 여기가 무너지면
+   오피스는 그럴듯한 그림일 뿐 관제가 아니다.
 """
 
 from __future__ import annotations
@@ -58,7 +61,7 @@ AGENT_FIELDS = {
     "agent_id", "name", "team", "eg_org", "persona", "zone", "room", "division",
     "division_color", "badge", "hat", "effect", "autonomy", "autonomy_declared",
     "control_state", "credentials_revoked", "blocked_tools", "runs", "complete",
-    "tokens", "cases", "last_model", "eg_refs", "last_trace",
+    "tokens", "cases", "last_model", "eg_refs", "last_trace", "busy_ms", "sectors",
 }
 
 
@@ -87,8 +90,76 @@ def test_three_tier_views_exist(html):
 def test_timeline_scrubber_replays_spans(html):
     """타임라인은 /api/trace 로 받은 스팬만 되감는다 — 합성 프레임이 아니다."""
     assert "/api/trace/" in html
-    assert "S.spans.slice(0, S.tl)" in html, "스크러버가 스팬을 자르지 않으면 리플레이가 아니다"
-    assert "renderTimeline" in html
+    assert "S.spans.filter(s => s.start_ns <= S.clock)" in html, \
+        "스크러버가 스팬 타임스탬프로 자르지 않으면 리플레이가 아니다"
+    assert "SPEEDS[S.speed]" in html, "재생 속도 설정이 재생 루프에 안 걸려 있다"
+    assert "function buildEvents" in html, \
+        "눈금이 스팬 시작·끝 시각에서 만들어지지 않으면 임의 시간축이다"
+
+
+# ── 5. 위치 = 스팬 ───────────────────────────────────────────────────────
+
+
+OCC_FIELDS = {"agent_id", "trace_id", "zone", "kind", "span", "tool", "asset",
+              "gate", "severity", "status", "start_ns", "end_ns"}
+
+
+def test_occupancy_is_one_row_per_span(state, root):
+    """점유 구간은 스팬에서만 온다 — 한 줄이라도 만들어내면 오피스는 거짓이 된다."""
+    from dawn_aoc.collect import TraceLake
+
+    occ = state["occupancy"]
+    assert occ, "점유 구간이 없으면 아무도 못 움직인다"
+    assert set(occ[0]) >= OCC_FIELDS, f"빠진 필드: {sorted(OCC_FIELDS - set(occ[0]))}"
+
+    runs = TraceLake(root).all_runs(limit=50)
+    spans = sum(len([s for s in r.spans if s["name"] != "invoke_agent"])
+                for r in runs if not r.is_orchestrator)
+    assert len(occ) == spans, f"스팬 {spans}개인데 점유 {len(occ)}개 — 지어냈거나 흘렸다"
+    for s in occ:
+        assert s["end_ns"] >= s["start_ns"]
+        assert s["kind"] in ("work", "desk")
+
+
+def test_work_segments_land_in_the_zone_that_owns_the_asset(state):
+    """`work` 구간의 존은 EG `Asset -LOCATED_IN-> Zone` 이 정한 것과 같아야 한다."""
+    owner = {a["id"]: z["short"] for z in state["zones"] for a in z["assets"]}
+    work = [s for s in state["occupancy"] if s["kind"] == "work"]
+    assert work, "자산을 건드린 스팬이 하나도 없다"
+    for s in work:
+        assert s["asset"] in owner, f"EG 에 없는 자산: {s['asset']}"
+        assert owner[s["asset"]] == s["zone"], f"{s['asset']} 는 {owner[s['asset']]} 에 있다"
+
+
+def test_idle_means_no_span_not_an_empty_desk(html, state):
+    """대기실은 '스팬이 없다'는 상태 자체다 — 그리려면 그 규칙이 코드에 있어야 한다."""
+    assert state["floorplan"]["lounge"]["id"] == "lounge"
+    assert "loungeSlot" in html and "segAt" in html
+    assert "if(!seg) return Object.assign(loungeSlot(a)" in html, \
+        "스팬이 없을 때 대기실로 보내는 분기가 없다"
+
+
+def test_floors_only_show_sectors_the_division_actually_uses(state):
+    """안 쓰는 방을 그려 두면 빈 방이 정상인지 장애인지 구분이 안 된다."""
+    fp = state["floorplan"]
+    assert fp["floors"], "층이 없다"
+    shorts = {z["short"] for z in state["zones"]}
+    for f in fp["floors"]:
+        assert f["sectors"], f"{f['name']} 에 섹터가 하나도 없다"
+        for z in f["sectors"]:
+            assert z["short"] in shorts
+            assert not z["is_gate"], "pipe 는 방이 아니라 문이다"
+        ranks = [int(str(z["security_level"]).split("L")[-1]) for z in f["sectors"]]
+        assert ranks == sorted(ranks), f"{f['name']} 섹터가 리스크 순이 아니다"
+    assert [g["short"] for g in fp["gates"]] == ["pipe"]
+
+
+def test_uniform_and_face_are_deterministic_encodings(html):
+    """같은 에이전트는 늘 같은 얼굴이어야 한다 — 난수를 쓰면 신원 표시가 아니다."""
+    assert "function hash32" in html, "id → 외모 결정론 해시가 없다"
+    assert "Math.random" not in html
+    for field in ("division_color", "a.hat", "a.badge", "a.team"):
+        assert field in html, f"유니폼이 {field} 에 안 붙어 있다"
 
 
 # ── 2. 하드코딩 픽스처 금지 ──────────────────────────────────────────────
@@ -108,8 +179,9 @@ def test_only_encoding_tables_are_hardcoded(html):
     """상수로 둬도 되는 건 **인코딩 표**뿐 (색↔등급 매핑). 데이터는 아니다."""
     body = html.split("<script>", 1)[-1]
     consts = set(re.findall(r"const\s+([A-Z][A-Z0-9_]*)\s*=", body))
-    assert consts <= {"ZONE_TINT", "SEV_COLOR", "EFFECT", "S"}, \
-        f"인코딩 표가 아닌 상수: {sorted(consts)}"
+    assert consts <= {"G", "ZONE_TINT", "SEV_COLOR", "EFFECT", "HAT", "MODEL_C",
+                      "IRR_C", "GATE_C", "KIND_FURN", "HAIR", "SKIN", "ACCENT",
+                      "SPEEDS", "SPEED_NAME", "S"}, f"인코딩 표가 아닌 상수: {sorted(consts)}"
     # S 는 런타임 홀더다 — **비어서 시작해야** 한다. 초기값에 데이터가 있으면 픽스처다.
     m = re.search(r"const\s+S\s*=\s*\{(.*?)\};", body, re.S)
     assert m and "state:null" in m.group(1).replace(" ", ""), \
@@ -142,6 +214,69 @@ def test_balanced_braces_in_script(html):
 
 
 # ── 4. 서버 ──────────────────────────────────────────────────────────────
+
+
+# ── 6. 헤드리스 실행 — 브라우저 없이 진짜로 돌려 본다 ────────────────────
+#
+# 정적 검사만으로는 "문법은 맞는데 첫 프레임에서 죽는" 콘솔을 못 잡는다.
+# quickjs 가 있으면 DOM·캔버스를 최소로 흉내 내 draw() 까지 돌리고, 사람이 어느
+# 섹터에 서 있는지 좌표로 확인한다. 없으면 skip — 배포에 필요한 의존이 아니다.
+
+
+@pytest.fixture(scope="module")
+def headless(root, state):
+    quickjs = pytest.importorskip(
+        "quickjs", reason="quickjs 없음 — `pip install quickjs` 로 헤드리스 검증 활성화")
+    harness = (root / "aoc" / "tests" / "office_harness.js").read_text(encoding="utf-8")
+    body = (root / "apps" / "pixel-office" / "index.html").read_text(
+        encoding="utf-8").split("<script>", 1)[1].split("</script>", 1)[0]
+
+    tid = next((a["last_trace"] for a in state["agents"] if a["last_trace"]), "")
+    spans = sorted(TraceLake(root).spans(tid), key=lambda s: s["start_ns"]) if tid else []
+
+    src = (harness.replace("__STATE__", json.dumps(state, ensure_ascii=False))
+                  .replace("__TRACE__", json.dumps(spans, ensure_ascii=False))
+                  .replace("__SCRIPT__", body))
+    ctx = quickjs.Context()
+    ctx.set_memory_limit(512 * 1024 * 1024)
+    ctx.set_time_limit(-1)
+    ctx.eval(src)
+    for _ in range(2000):                       # fetch 프라미스를 끝까지 돌린다
+        if not ctx.execute_pending_job():
+            break
+    return json.loads(ctx.eval("runChecks()"))
+
+
+def test_console_actually_runs_headless(headless):
+    assert not headless["errors"], headless["errors"]
+    for view, calls in headless["views"].items():
+        assert calls > 50, f"{view} 뷰가 사실상 아무것도 안 그렸다 ({calls} 콜)"
+    assert not headless["calls"]["warn"], f"NaN 좌표: {headless['calls']['warn'][:5]}"
+
+
+def test_everyone_stands_where_their_spans_say(headless):
+    """사람이 섹터 안에 서 있다 = 그 시각 거기서 실제로 도구를 썼다."""
+    bad = [(when, r) for when, rows in headless["placements"].items()
+           for r in rows if not r["ok"]]
+    assert not bad, f"스팬과 다른 자리에 서 있다: {bad[:3]}"
+    before = headless["placements"]["before"]
+    assert all(r["place"] == "lounge" for r in before), "기록 구간 이전인데 근무 중인 사람이 있다"
+
+
+def test_agents_walk_into_the_sector_and_idle_ones_do_not_twitch(headless):
+    """움직임은 텔레메트리 전이의 보간일 뿐 — 장식 애니메이션이 아니다."""
+    w = headless["walk"]
+    assert w["moved"] > 1, "작업이 바뀌었는데 아무도 움직이지 않았다"
+    assert w["arrived"] < 0.05, f"목표 섹터에 도착하지 못했다 (남은 거리 {w['arrived']})"
+    assert w["inSector"], f"{w['zone']} 섹터 안으로 들어가지 못했다"
+    assert w["awayFromDesk"] > 1, "근무 자리가 자기 자리와 같으면 '섹터 진입'이 아니다"
+    assert w["idleDrift"] == 0, "대기 중인 에이전트가 흔들렸다 — 장식 애니메이션이다"
+
+
+def test_roster_and_hit_targets_exist(headless, state):
+    assert headless["roster"] == len(state["agents"]), "명부 초상이 인원 수와 다르다"
+    assert headless["hits"]["people"] == len(state["agents"]), "클릭할 수 없는 사람이 있다"
+    assert headless["hits"]["total"] > headless["hits"]["people"], "섹터를 클릭할 수 없다"
 
 
 @pytest.fixture(scope="module")
