@@ -203,11 +203,14 @@ def cmd_emit(args) -> int:
 def cmd_hitl(args) -> int:
     q = ApprovalQueue(Paths().root)
     if args.action == "list":
-        items = q.list(args.status)
+        items = q.list(args.status, purpose=args.purpose)
         if args.json:
             print(json.dumps([a.to_dict() for a in items], ensure_ascii=False, indent=2))
             return 0
-        print(f"{B}HITL 승인 큐{Z}  ({len(items)}건)")
+        c = q.counts()
+        print(f"{B}HITL 승인 큐{Z}  ({len(items)}건)"
+              + (f"  {D}대기: " + " · ".join(f"{k} {v}" for k, v in sorted(c.items()))
+                 + f"{Z}" if c else ""))
         for a in items:
             print("  " + a.line())
             for r in a.reasons[:3]:
@@ -217,8 +220,22 @@ def cmd_hitl(args) -> int:
         if not args.id:
             print("승인 id 가 필요하다", file=sys.stderr)
             return 2
+        before = q.get(args.id)
+        if before.run_ended:
+            # 사람이 눌러 놓고 집행됐다고 믿는 것이 가장 나쁘다.
+            print(_t("이 요청을 낸 실행은 이미 끝났다 — 승인해도 그 행동은 "
+                     "집행되지 않는다.", Y))
+            print(f"  {D}판단은 기록으로 남는다. 그 행동이 지금 필요하면 "
+                  f"작업을 다시 돌려라.{Z}")
         a = q.decide(args.id, approve=args.action == "approve", by=args.by, note=args.note or "")
         print(_t(f"✔ {a.id} → {a.status} (by {a.decided_by})", G))
+        return 0
+    if args.action == "expire":
+        if not args.note:
+            print("--note 로 만료 사유를 적어라 (거부가 아니라 만료다)", file=sys.stderr)
+            return 2
+        done = q.expire(purpose=args.purpose, note=args.note)
+        print(_t(f"⌛ {len(done)}건 만료 (승인도 거부도 아니다)", G))
         return 0
     if args.action == "clear":
         print(f"{q.clear()}건 삭제")
@@ -321,8 +338,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     x = s.add_parser("hitl", help="승인 큐")
     x.add_argument(
-        "action", choices=["list", "approve", "deny", "clear"], default="list", nargs="?"
+        "action", choices=["list", "approve", "deny", "expire", "clear"],
+        default="list", nargs="?"
     )
+    x.add_argument("--purpose", default=None,
+                   help="이 목적만 (work|drill|redteam|demo|unknown)")
     x.add_argument("id", nargs="?")
     x.add_argument("--status", default=None)
     x.add_argument("--by", default="human")

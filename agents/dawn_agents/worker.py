@@ -67,6 +67,9 @@ class WorkerRun:
     task: str
     steps: list[Step] = field(default_factory=list)
     trace_id: str = ""
+    # 이 실행이 실업무인가 훈련인가. **run 의 속성이다** — 승인 요청·케이스가
+    # 이걸 그대로 물려받아야 훈련이 사람의 큐를 막지 않는다.
+    purpose: str = "work"
     model: str = ""
     model_policy: str = ""
     provider: str = ""
@@ -260,10 +263,14 @@ class Worker:
                     gate_decision=decision,
                     args=kwargs,
                     trace_id=run.trace_id,
+                    purpose=run.purpose,     # 훈련이 사람의 큐를 막지 않게
                 )
                 run.hitl_requests.append(ap.id)
                 sp.set(**{"dawn.hitl.id": ap.id})
                 sp.event("blocked", reason="; ".join(decision.reasons))
+                # 여기서 run 이 끝난다 — 나중에 승인해도 이 행동은 집행되지 않는다.
+                # 화면이 그 사실을 말할 수 있게 남긴다.
+                self.queue.mark_run_ended(ap.id)
                 self._step(run, "hitl", f"차단 → 승인 큐 {ap.id}", False)
                 return decision, None
 
@@ -275,11 +282,13 @@ class Worker:
                     gate_decision=decision,
                     args=kwargs,
                     trace_id=run.trace_id,
+                    purpose=run.purpose,     # 훈련이 사람의 큐를 막지 않게
                 )
                 run.hitl_requests.append(ap.id)
                 sp.set(**{"dawn.hitl.id": ap.id})
                 if not auto_approve_enabled():
                     sp.event("awaiting_approval", approval_id=ap.id)
+                    self.queue.mark_run_ended(ap.id)     # 재개 경로가 없다
                     self._step(run, "hitl", f"승인 대기 {ap.id} — 실행 보류", False)
                     return decision, None
                 self.queue.decide(
@@ -415,7 +424,7 @@ class Worker:
         """
         if purpose not in RUN_PURPOSES:
             raise ValueError(f"알 수 없는 run 목적: {purpose} — {sorted(RUN_PURPOSES)}")
-        wr = WorkerRun(agent_id=self.agent_id, task=task)
+        wr = WorkerRun(agent_id=self.agent_id, task=task, purpose=purpose)
         self._step_n = 0
 
         with self.tracer.span(

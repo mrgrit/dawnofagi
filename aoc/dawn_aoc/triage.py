@@ -79,6 +79,9 @@ class Case:
     team: str = ""
     eg_org: str = ""
     zone: str = ""
+    # 이 케이스를 만든 run 이 실업무였나 훈련이었나. 대응이 승인 큐로 갈 때
+    # 그대로 따라간다 — 안 그러면 리허설이 사람의 큐를 막는다(실측 2303건).
+    purpose: str = "unknown"
     axis: str = "security"
     severity: str = "low"
     severity_score: int = 0
@@ -138,6 +141,7 @@ def triage(run, detections: list[Detection], *, eg_store=None) -> Case | None:
         id=f"case-{uuid.uuid4().hex[:10]}",
         trace_id=run.trace_id,
         agent_id=run.agent_id,
+        purpose=getattr(run, "purpose", "unknown"),
         team=run.team,
         eg_org=run.eg_org,
         zone=run.zone,

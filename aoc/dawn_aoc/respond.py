@@ -84,6 +84,7 @@ class Responder:
                     agent_id=case.agent_id, skill=f"aoc.{pb}",
                     gate_decision=_GateShim(case, pb), args={"case_id": case.id},
                     trace_id=case.trace_id,
+                    purpose=getattr(case, "purpose", "unknown"),
                 )
                 results.append(ActionResult(
                     pb, False, reason="비가역 — 사람 승인 전에는 집행하지 않는다",
@@ -125,6 +126,7 @@ class Responder:
                     agent_id=case.agent_id, skill=f"aoc.{pb}",
                     gate_decision=_GateShim(case, pb), args={"case_id": case.id},
                     trace_id=case.trace_id,
+                    purpose=getattr(case, "purpose", "unknown"),
                 )
                 return ActionResult(pb, True, hitl_id=ap.id, detail="승인 큐로", at=_now())
         except Exception as exc:

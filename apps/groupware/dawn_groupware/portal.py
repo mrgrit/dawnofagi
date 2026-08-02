@@ -181,7 +181,7 @@ def _forbidden(request: Request, user: User, capability: str) -> HTMLResponse:
 
 def _sidebar(request: Request, user: User, current: str) -> Safe:
     q: ApprovalQueue = request.app.state.queue
-    pending = len(q.pending())
+    pending = len(q.pending(purpose="work"))   # 훈련은 뱃지를 울리지 않는다
     items: list[tuple[str, str, str, str | None]] = [
         ("개입", "", "", None),
         ("/approvals", "승인 큐", "hitl.view", str(pending) if pending else None),
@@ -317,7 +317,7 @@ async def dashboard(request: Request) -> Response:
     reg = request.app.state.registry
     eg = request.app.state.eg
 
-    pending = q.pending()
+    pending = q.pending(purpose="work")
     mine = [ap for ap in pending
             if can_approve(user, agent_org=_agent_org(reg, ap.agent_id),
                            severity=ap.severity, eg_store=eg)[0]]
@@ -408,7 +408,14 @@ async def approvals(request: Request) -> Response:
     q: ApprovalQueue = request.app.state.queue
     reg, eg = request.app.state.registry, request.app.state.eg
     status = request.query_params.get("status", "pending")
-    items = q.list(None if status == "all" else status)
+    # **기본은 실업무만.** 훈련(리허설·레드팀)을 섞으면 사람이 볼 것을 못 찾는다 —
+    # 실측으로 대기 2633건 중 2303건이 인시던트 리허설이었다. 지우지는 않는다:
+    # 리허설이 게이트를 제대로 때렸다는 사실 자체가 증거다.
+    scope = request.query_params.get("scope", "work")
+    items = q.list(None if status == "all" else status,
+                   purpose=None if scope == "all" else scope)
+    counts = q.counts()
+    drills = sum(v for k, v in counts.items() if k != "work")
 
     mine, others = [], []
     for ap in items:
@@ -420,10 +427,17 @@ async def approvals(request: Request) -> Response:
         h1("승인 큐"),
         p("에이전트가 비가역·고심각 행동 앞에서 멈춰 사람을 기다리는 곳이다. "
           "여기서 누르기 전에는 그 행동이 실행되지 않는다.", class_="lede"),
-        div(*[a(t, href=f"/approvals?status={s}",
+        div(*[a(t, href=f"/approvals?status={s}&scope={scope}",
                 class_="btn ghost" if status != s else "btn")
               for s, t in [("pending", "대기"), ("approved", "승인됨"),
                            ("denied", "거부됨"), ("all", "전체")]], class_="row"),
+        div(*[a(t, href=f"/approvals?status={status}&scope={s}",
+                class_="btn ghost" if scope != s else "btn")
+              for s, t in [("work", f'실업무 {counts.get("work", 0)}'),
+                           ("all", f"전체 {sum(counts.values())}")]], class_="row"),
+        (small(f"훈련·미분류 {drills}건은 기본 화면에서 숨긴다 — "
+               "지우지는 않는다(게이트가 제대로 막았다는 증거다).", class_="dim")
+         if drills else None),
 
         h2(f"내가 승인할 수 있는 것 ({len(mine)})"),
         _approval_table(request, mine, reg, eg) if mine
@@ -471,6 +485,8 @@ async def approval_detail(request: Request) -> Response:
             span("정책", class_="k"), span(", ".join(ap.policies) or "-"),
             span("트레이스", class_="k"), span(code(ap.trace_id or "-")),
             span("요청 시각", class_="k"), span(ap.requested_at.replace("T", " ")),
+            span("목적", class_="k"),
+            span(ap.purpose + ("" if ap.is_work else "  — 훈련이다")),
             span("상태", class_="k"),
             span(span(ap.status, class_="tag " + {"pending": "warn", "approved": "ok",
                                                   "denied": "bad"}.get(ap.status, ""))),
@@ -483,6 +499,20 @@ async def approval_detail(request: Request) -> Response:
 
         h3("인자"),
         pre(_fmt_args(ap.args)),
+
+        # **승인이 집행으로 이어지는지 먼저 말한다.** 이 시스템의 HITL 은
+        # "멈추고 기록"이지 "기다렸다 재개"가 아니다 — 그걸 화면이 안 말하면
+        # 사람이 눌러 놓고 집행됐다고 믿는다.
+        (div(Safe("<b>이 요청을 낸 실행은 이미 끝났다.</b> 지금 승인해도 "
+                  "<b>그 행동은 집행되지 않는다</b> — 이 시스템의 HITL 은 멈추고 "
+                  "기록하는 구조이지 기다렸다 재개하는 구조가 아니다.<br>"
+                  "<span class='dim small'>여기서 누르는 것은 <b>판단 기록</b>이다: "
+                  "같은 상황을 다음에 허용할지에 대한 근거로 남는다. 지금 그 행동이 "
+                  "필요하면 작업을 다시 돌려라.</span>"), class_="flash warn")
+         if ap.run_ended and not decided else None),
+        (div("이 요청은 훈련(리허설·레드팀)에서 나왔다. 게이트가 제대로 막았다는 "
+             "증거이지 사람이 판단할 일이 아니다.", class_="flash warn")
+         if not ap.is_work and not decided else None),
 
         h3("승인 권한"),
         div(
