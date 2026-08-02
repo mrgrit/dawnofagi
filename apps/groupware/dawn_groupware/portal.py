@@ -1013,6 +1013,7 @@ async def order_detail(request: Request) -> Response:
                   f'{r["created_at"][:16].replace("T", " ")}', class_="dim"),
             markdownish(r["body"]) if r["body"] else None,
         ]), class_="card"),
+        _order_infra(root, r),
         h1("결재"),
         join(steps) if steps else p("결재 라인이 없다 — division.yaml 에 lead 가 없다.",
                                     class_="empty"),
@@ -1020,6 +1021,42 @@ async def order_detail(request: Request) -> Response:
         p(a("← 작업 지시", href="/orders")),
     ])
     return _shell(request, user, f'작업 지시 #{wid}', body, current="/orders")
+
+
+def _order_infra(root, r) -> Safe:
+    """이 결재가 무엇을 점유하게 되는지 (P7 DoD-3).
+
+    결재자가 "승인"을 누르기 전에 **무엇이 나가는지** 보여야 한다. 등급만 적혀
+    있으면 `server` 가 무슨 뜻인지 모르는 채 누르게 된다.
+    """
+    from dawn_core import workintake
+    from dawn_core.infrapool import PoolError, allocation_of, plan
+
+    if r["infra_tier"] == "none":
+        return Safe("")
+    a = allocation_of(root, r["id"])
+    if a is None:
+        zone = r["zone"] or workintake.zone_for(root, r["division"])
+        try:
+            a = plan(root, order_id=r["id"], tier=r["infra_tier"], zone=zone,
+                     business=r["business"])
+            head = "승인하면 잡히는 것"
+        except PoolError as e:
+            return div(join([Safe("<b>인프라</b>"),
+                             small(f"할당할 수 없다 — {e}", class_="dim")]),
+                       class_="card")
+    else:
+        head = {"ready": "잡힌 자원", "waiting": "준비대기",
+                "released": "반납됨"}.get(a.state, a.state)
+    what = a.host_id or a.container or "—"
+    return div(join([
+        Safe("<b>인프라</b> ") + span(head, class_="tag"),
+        small(f'{workintake.TIER_LABEL.get(a.tier, (a.tier, ""))[0]} · {what}'
+              + (f' · {a.network}' if a.network else "")
+              + (f' · 존 {a.zone}' if a.zone else ""), class_="dim"),
+        small(a.reason, class_="dim") if a.reason else None,
+        small("집행: " + a.command, class_="dim") if a.command else None,
+    ]), class_="card")
 
 
 @require("portal.view")

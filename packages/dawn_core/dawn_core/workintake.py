@@ -94,6 +94,18 @@ def division_choices(root: Path) -> list[tuple[str, str]]:
             for did, d in sorted(Registry.load(root).divisions.items())]
 
 
+def zone_for(root: Path, division: str) -> str:
+    """이 작업이 놓일 존. **담당 본부에서 파생한다** — 요청자가 고르지 않는다.
+
+    존은 게이트와 심각도 계산의 입력이라 사람이 자유롭게 고르면 통제가 흔들린다.
+    본부가 정해지면 존도 정해진다 (`org/divisions/*/division.yaml` 의 `zone`).
+    """
+    from . import Registry
+
+    d = Registry.load(root).divisions.get(division)
+    return (d.data.get("zone", "") if d else "") or ""
+
+
 def validate(root: Path, *, business: str, infra_tier: str,
              division: str = "") -> tuple[str, str]:
     """(담당 본부, 인프라 등급) 을 확정한다. 규칙을 어기면 예외.

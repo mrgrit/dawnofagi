@@ -166,6 +166,17 @@ def can_start(store, order_id: int) -> tuple[bool, str]:
         return False, f"작업 지시 없음: {order_id}"
     if r["status"] not in ("approved", "provisioning", "in_progress"):
         return False, f"결재가 끝나지 않았다 (지금 {r['status']})"
+
+    # 환경이 필요한 작업인데 아직 안 잡혔으면 착수하지 않는다. 착수시켜 놓고
+    # 자원이 없어 실패하면 그건 작업의 실패로 기록돼 KPI 가 거짓말을 한다.
+    if r["infra_tier"] != "none":
+        from dawn_core.infrapool import allocation_of
+
+        a = allocation_of(Paths().root, order_id)
+        if a is None or a.state != "ready":
+            why = a.reason if a else "할당 이력이 없다"
+            return False, f"인프라가 준비되지 않았다 ({r['infra_tier']}) — {why}"
+
     if not formed(Paths().root, order_id=order_id):
         return False, "편성된 에이전트가 없다 — 먼저 편성하라"
     return True, ""

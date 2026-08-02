@@ -190,6 +190,16 @@ def cmd_status(args) -> int:
               f"{a['last_model'] or '-'}")
     print(f"\n{B}업무 데이터{Z}  " +
           " · ".join(f"{k} {v}" for k, v in biz.counts().items() if v))
+
+    from dawn_core.infrapool import summary as pool_summary
+
+    pool = pool_summary(root)
+    print(f"\n{B}인프라{Z}  장비 {pool['hosts_total']}대 "
+          f"(vm {pool['hosts_free']['vm']} · server {pool['hosts_free']['server']} 가용) · "
+          f"컨테이너 {pool['container_used']}/{pool['container_max']} · "
+          f"할당 {pool['allocated']}건")
+    for w in pool["waiting"]:
+        print(f"  {_t('준비대기', Y)} #{w['order_id']} {w['tier']} — {w['reason'][:70]}")
     print(f"\n{B}관제{Z}  케이스 {len(st['cases'])} · "
           f"승인 대기 {len([x for x in st['hitl'] if x['status'] == 'pending'])} · "
           f"수집 {st['collect']['spans']} 스팬 / {st['collect']['tokens']:,} 토큰")

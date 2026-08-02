@@ -325,6 +325,91 @@ def cmd_orders(args) -> int:
     return 0
 
 
+def cmd_infra(args) -> int:
+    """인프라 풀 (P7 DoD-3).
+
+    **할당은 비가역 행동이다** — 결재가 끝난 지시에만 붙는다.
+    풀이 비면 실패가 아니라 `waiting_infra` 다. 장비를 넣거나 누가 반납하면 이어서 돈다.
+    """
+    from dawn_core.infrapool import PoolError, plan, summary
+
+    from .provision import confirm_executed, deprovision, provision, retry_waiting
+
+    root = _root()
+    s = _store(args)
+
+    if args.retry:
+        out = retry_waiting(s, root)
+        print(f"{B}준비대기 재시도{Z}  {len(out)}건")
+        for x in out:
+            print(f"  {R}✗ {x}{Z}" if isinstance(x, Exception) else x.line())
+        return 0
+
+    if args.id is None:
+        d = summary(root)
+        print(f"{B}인프라 풀{Z}")
+        print(f"  장비        {d['hosts_total']}대  "
+              f"vm {d['hosts_free']['vm']}/{d['hosts_by_kind']['vm']} 가용 · "
+              f"server {d['hosts_free']['server']}/{d['hosts_by_kind']['server']} 가용")
+        print(f"  컨테이너     {d['container_used']}/{d['container_max']}  "
+              f"{D}(도커 접근 {'가능' if d['docker'] else '불가 — 사람이 집행'}){Z}")
+        print(f"  할당 중      {d['allocated']}건")
+        if d["waiting"]:
+            print(f"  {Y}준비대기{Z}     {len(d['waiting'])}건")
+            for w in d["waiting"]:
+                print(f"    #{w['order_id']} {w['tier']} — {w['reason']}")
+        if not d["hosts_total"]:
+            print(f"  {D}풀이 비어 있다 — infra/pool.yaml 에 장비를 등록하면 "
+                  f"vm·server 등급이 돈다{Z}")
+        return 0
+
+    r = s.work_order(args.id)
+    if r is None:
+        print(f"작업 지시 없음: {args.id}")
+        return 2
+
+    if args.confirm:
+        try:
+            a = confirm_executed(s, root, args.id, by=args.confirm)
+        except PoolError as e:
+            print(f"{R}확인 거부{Z}  {e}")
+            return 2
+        print(f"{B}집행 확인{Z}  {a.line()}")
+        print(f"  {D}작업 지시 상태 → {s.work_order(args.id)['status']}{Z}")
+        return 0
+
+    if args.release:
+        a = deprovision(s, root, args.id)
+        if a is None:
+            print(f"{D}#{args.id} 에 잡힌 자원이 없다{Z}")
+            return 0
+        print(f"{B}반납{Z}  {a.line()}")
+        if a.command:
+            print(f"  {Y}실물 정리는 사람이 한다{Z}: {a.command}")
+        return 0
+
+    if args.dry_run:
+        from dawn_core import workintake
+
+        zone = r["zone"] or workintake.zone_for(root, r["division"])
+        print(f"{B}할당 계획{Z} (쓰지 않는다)")
+        print(plan(root, order_id=args.id, tier=r["infra_tier"], zone=zone,
+                   business=r["business"]).line())
+        return 0
+
+    try:
+        a = provision(s, root, args.id)
+    except (PoolError, ValueError) as e:
+        print(f"{R}할당 거부{Z}  {e}")
+        return 2
+    print(f"{B}할당{Z}  {a.line()}")
+    if a.command and a.state != "ready":
+        print(f"  {Y}집행 명령{Z}: {a.command}")
+        print(f"  {D}실행 후: dawn-biz infra --retry{Z}")
+    print(f"  {D}작업 지시 상태 → {s.work_order(args.id)['status']}{Z}")
+    return 0
+
+
 def cmd_crew(args) -> int:
     """작업 지시에 에이전트를 편성한다 (P7 DoD-4).
 
@@ -499,6 +584,15 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--status", default="")
     x.add_argument("--origin", default="", choices=["", "external", "internal", "standing"])
     x.set_defaults(func=cmd_orders)
+
+    x = s.add_parser("infra", help="인프라 풀 — 할당·반납·현황 (P7 DoD-3)")
+    x.add_argument("id", nargs="?", type=int, help="작업 지시 id (없으면 풀 현황)")
+    x.add_argument("--release", action="store_true", help="반납")
+    x.add_argument("--retry", action="store_true", help="준비대기 중인 지시를 다시 시도")
+    x.add_argument("--confirm", metavar="WHO",
+                   help="사람이 집행했다고 선언 (시스템이 검증한 것은 아니다)")
+    x.add_argument("--dry-run", action="store_true", help="계획만 보고 잡지 않는다")
+    x.set_defaults(func=cmd_infra)
 
     x = s.add_parser("crew", help="작업 지시에 에이전트 편성 (P7)")
     x.add_argument("id", type=int)

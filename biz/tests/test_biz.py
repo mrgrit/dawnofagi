@@ -510,8 +510,12 @@ def test_unjudged_is_not_treated_as_failure():
     assert v.quality is None and v.passed
 
 
-def test_cannot_start_before_approval_and_crew(tmp_path, root):
-    """착수는 승인·편성 뒤에만. 둘 중 하나만 있어도 안 된다."""
+def test_cannot_start_before_approval_infra_and_crew(tmp_path, root):
+    """착수 앞에 관문이 셋이다: 결재 → 인프라 → 편성. 하나라도 비면 안 된다.
+
+    인프라 관문이 필요한 이유: 자원 없이 착수시키면 그 실패가 **작업의 실패**로
+    기록돼 KPI 가 거짓말을 한다. 못 하는 것과 안 되는 것은 다르다.
+    """
     from dawn_biz.execute import can_start
 
     s = BizStore(tmp_path, tenant=0)
@@ -522,4 +526,11 @@ def test_cannot_start_before_approval_and_crew(tmp_path, root):
 
     s.set_work_order_status(wid, "approved")
     ok, why = can_start(s, wid)
+    assert not ok and "인프라" in why, why
+
+    # 환경이 필요 없는 작업은 인프라 관문을 그냥 지난다 — 다음은 편성이다.
+    nid = s.add_work_order(title="[테스트] 환경 불필요", body="",
+                           business="ax-consulting", division="ax", infra_tier="none")
+    s.set_work_order_status(nid, "approved")
+    ok, why = can_start(s, nid)
     assert not ok and "편성" in why, why
