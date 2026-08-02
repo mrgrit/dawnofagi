@@ -112,8 +112,16 @@
       "owner_org": "org:hr"
     },
     {
-      "id": "asset:portal",
-      "name": "포털·웹앱",
+      "id": "asset:site",
+      "name": "공개 홈페이지(대고객 창구)",
+      "kind": "system",
+      "irreversibility": "write",
+      "owner_org": "org:mgmt",
+      "_note": "외부인이 보는 접점. 게시는 되돌릴 수 있으나 밖에 노출된다."
+    },
+    {
+      "id": "asset:groupware",
+      "name": "사내 그룹웨어(승인·EG 조정)",
       "kind": "system",
       "irreversibility": "write",
       "owner_org": "org:it-dc"
@@ -208,7 +216,12 @@
     },
     {
       "type": "LOCATED_IN",
-      "from": "asset:portal",
+      "from": "asset:site",
+      "to": "zone:ext"
+    },
+    {
+      "type": "LOCATED_IN",
+      "from": "asset:groupware",
       "to": "zone:dmz"
     },
     {
@@ -318,7 +331,12 @@
     },
     {
       "type": "CLASSIFIED_AS",
-      "from": "asset:portal",
+      "from": "asset:site",
+      "to": "sec:L0"
+    },
+    {
+      "type": "CLASSIFIED_AS",
+      "from": "asset:groupware",
       "to": "sec:L2"
     },
     {

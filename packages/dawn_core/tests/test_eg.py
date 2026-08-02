@@ -32,10 +32,14 @@ from dawn_core.paths import Paths
 #       +엣지 9  각 자산의 LOCATED_IN · CLASSIFIED_AS · OWNED_BY
 #       +엣지 1  USES_MODEL org:mgmt → model:openlocal (고객 문의 = 개인정보 → 로컬)
 #       +엣지 1  HAS_PERSONA org:mgmt → persona:corporate (하위 조직엔 있는데 상위만 빠져 있었다)
+#   Q6  +노드 1  asset:portal 을 asset:site(공개 홈페이지) · asset:groupware(사내)로 분리
+#       +엣지 2  분리된 두 자산의 LOCATED_IN · CLASSIFIED_AS (portal 것 2개는 사라짐)
+#                공개 홈페이지는 대고객 접점이므로 zone:ext(로비) · sec:L0 로 옮겼다.
+#                하나로 묶여 있어서 "우리 대고객 창구가 어디냐"에 답할 수 없었다.
 #
 # 숫자를 그냥 올리지 않는다. 늘었으면 왜 늘었는지가 여기 적혀야 한다.
-EXPECTED_NODES = 77
-EXPECTED_EDGES = 148
+EXPECTED_NODES = 78
+EXPECTED_EDGES = 150
 
 
 @pytest.fixture(scope="module")
