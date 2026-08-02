@@ -329,6 +329,52 @@ def cmd_orders(args) -> int:
     return 0
 
 
+def cmd_close(args) -> int:
+    """작업 지시 마감 (P7 DoD-7).
+
+    **기록을 먼저 남기고 자원을 놓는다.** 반대로 하면 반납 뒤에 무엇을 썼는지 모른다.
+    """
+    from .records import close, settle, usage
+
+    root = _root()
+    s = _store(args)
+    r = s.work_order(args.id)
+    if r is None:
+        print(f"작업 지시 없음: {args.id}")
+        return 2
+
+    u = usage(root, args.id)
+    st = settle(root, u)
+    print(f"{B}#{args.id}{Z} {r['title']}")
+    print(f"  실행    run {u.runs}건 (완료 {u.completed}) · 도구 {u.tool_calls} · "
+          f"차단 {u.blocked}")
+    print(f"  토큰    in {u.tokens_in:,} / out {u.tokens_out:,} · "
+          f"소요 {u.wall_ms / 1000:.1f}s")
+    print(f"  편성    {', '.join(u.agents) or '없음'}")
+    for ln in st.lines:
+        print(f"  원가    {ln['what']:<20} {ln['krw']:>10,} {st.currency}")
+    print(f"  {B}합계    {st.total:>28,} {st.currency}{Z}"
+          + ("" if st.complete else _c("   ← 하한 (미정 있음)", Y)))
+    for x in st.unpriced:
+        print(f"  {D}미정    {x}{Z}")
+    print(f"  {D}원가다. 청구액이 아니다 — 단가는 org/ratecard.yaml{Z}")
+
+    if args.dry_run:
+        print(f"  {D}(dry-run — 아무것도 쓰지 않았다){Z}")
+        return 0
+
+    out = close(s, root, args.id, release=not args.keep)
+    print(f"\n{B}마감{Z}")
+    print(f"  일지 #{out['worklog_id']} · 보고서 #{out['report_id']}"
+          + (f" · 경비 #{out['expense_id']}" if out["expense_id"]
+             else f"  {D}(원가 미확정 — 경비 미기표){Z}"))
+    if out.get("released"):
+        print(f"  반납 {out['released'].get('host_id') or out['released'].get('container')}")
+    print(f"  편성 회수 {len(out['disbanded'])}명 · 상태 → "
+          f"{s.work_order(args.id)['status']}")
+    return 0
+
+
 def cmd_standing(args) -> int:
     """상시 작업 (P7 DoD-6).
 
@@ -637,6 +683,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--status", default="")
     x.add_argument("--origin", default="", choices=["", "external", "internal", "standing"])
     x.set_defaults(func=cmd_orders)
+
+    x = s.add_parser("close", help="작업 지시 마감 — 일지·보고서·원가·반납 (P7 DoD-7)")
+    x.add_argument("id", type=int)
+    x.add_argument("--dry-run", action="store_true", help="사용량·원가만 보고 안 쓴다")
+    x.add_argument("--keep", action="store_true", help="자원을 반납하지 않는다")
+    x.set_defaults(func=cmd_close)
 
     x = s.add_parser("standing", help="상시 작업 — 등록·현황·1회전 (P7 DoD-6)")
     x.add_argument("--register", action="store_true",

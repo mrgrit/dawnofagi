@@ -384,7 +384,7 @@ tenant:  ## 멀티테넌트 준비 점검 + 고객 온보딩 절차
 check: lint test registry compile control-lint eg-validate eg-bridge biz-egcheck  ## CI와 동일한 전체 검사
 
 .PHONY: verify
-verify:  ## P0~P6 전체 자기검증 (통제·EG·하네스·관제·그룹웨어·업무·통합)
+verify:  ## P0~P7 전체 자기검증 (통제·EG·하네스·관제·그룹웨어·업무·통합·작업지시)
 	@bash scripts/verify-p0.sh
 	@bash scripts/verify-p1.sh
 	@bash scripts/verify-p2.sh
@@ -392,6 +392,11 @@ verify:  ## P0~P6 전체 자기검증 (통제·EG·하네스·관제·그룹웨�
 	@bash scripts/verify-p4.sh
 	@bash scripts/verify-p5.sh
 	@bash scripts/verify-p6.sh
+	@bash scripts/verify-p7.sh
+
+.PHONY: verify-p7
+verify-p7:  ## P7 자기검증만 — 작업 지시 파이프라인 E2E
+	@bash scripts/verify-p7.sh
 
 .PHONY: secrets
 secrets:  ## 저장소 전체 시크릿 스캔
