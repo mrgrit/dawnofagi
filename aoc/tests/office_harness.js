@@ -226,6 +226,54 @@ function runChecks() {
     drawLevel = realDrawLevel;
     S.room = { kind: "", id: "" };
 
+    // 2a. **클릭이 실제로 그 대상에 닿는가.** 바닥이 방·팀을 가린 적이 있다 —
+    // 눌러도 아무 일이 안 일어나는데 화면은 멀쩡해서 눈으로는 못 잡는다.
+    S.view = "floor"; S.div = busyDiv; S.room = { kind: "", id: "" };
+    S.sel = { kind: "floor", id: S.div };
+    focusLevel(levelByDiv(S.div));
+    draw();
+    out.clicks = { sector: [], team: [], lounge: null };
+    var floorPlan = S.state.floorplan.floors.find(function (x) {
+      return x.division_id === busyDiv; });
+    var divInfo = S.state.divisions.find(function (d) { return d.division_id === busyDiv; });
+
+    function centroidPick(needle) {
+      // tip 에 needle 이 들어 있는 히트를 찾아 그 폴리곤 중심을 클릭해 본다
+      var target = null;
+      for (var i = 0; i < S.hit.length; i++) {
+        var hh = S.hit[i];
+        if (!hh.poly || !hh.tip) continue;
+        if (String(hh.tip()).indexOf(needle) < 0) continue;
+        target = hh; break;
+      }
+      if (!target) return { found: false, needle: needle };
+      var cx = 0, cy = 0;
+      target.poly.forEach(function (pt) { cx += pt.x; cy += pt.y; });
+      cx /= target.poly.length; cy /= target.poly.length;
+      var got = pick({ clientX: cx, clientY: cy });
+      return { found: true, needle: needle, hit: got === target,
+               got: got && got.tip ? String(got.tip()).slice(0, 40) : "(없음)" };
+    }
+
+    floorPlan.sectors.forEach(function (z) {
+      out.clicks.sector.push(centroidPick(z.pixel_room));
+    });
+    divInfo.teams.forEach(function (tm) {
+      out.clicks.team.push(centroidPick(tm.name));
+    });
+    out.clicks.lounge = centroidPick(S.plan.info.name);
+
+    // 방을 눌러 실제로 룸 뷰로 들어가지는가
+    var firstSector = floorPlan.sectors[0];
+    var h2 = null;
+    for (var k = 0; k < S.hit.length; k++) {
+      var c = S.hit[k];
+      if (c.poly && c.tip && String(c.tip()).indexOf(firstSector.pixel_room) >= 0) { h2 = c; break; }
+    }
+    if (h2) { h2.go(); }
+    out.clicks.entered = { view: S.view, kind: S.room.kind, id: S.room.id };
+    S.view = "floor"; S.room = { kind: "", id: "" }; focusLevel(levelByDiv(S.div));
+
     // 2b. 층 상세 패널 — 업무·권한이 실제로 붙었나
     S.view = "floor"; S.div = S.state.floorplan.floors[0].division_id;
     ["floor", "sector", "team", "lounge"].forEach(function (kind) {

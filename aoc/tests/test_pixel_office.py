@@ -376,6 +376,20 @@ def test_floor_view_draws_only_that_floor(headless, state):
         "층 하나가 사옥 전체보다 무겁다면 다른 층까지 그리고 있는 것이다"
 
 
+def test_clicking_a_room_or_team_actually_reaches_it(headless):
+    """바닥이 방·팀 위를 덮으면 눌러도 아무 일이 안 일어난다 — 눈으로는 못 잡는 종류다."""
+    c = headless["clicks"]
+    for kind in ("sector", "team"):
+        for row in c[kind]:
+            assert row["found"], f"{kind} '{row['needle']}' 에 클릭 영역이 아예 없다"
+            assert row["hit"], \
+                f"{kind} '{row['needle']}' 를 눌렀는데 '{row['got']}' 가 잡힌다"
+    assert c["lounge"]["found"] and c["lounge"]["hit"], "휴게실을 클릭할 수 없다"
+    assert c["entered"] == {"view": "room", "kind": "sector",
+                            "id": c["entered"]["id"]}, c["entered"]
+    assert c["entered"]["id"], "방을 눌렀는데 룸 뷰로 안 들어간다"
+
+
 def test_room_view_shows_one_room_only(headless):
     """방/부서 안으로 들어가면 층 평면은 사라지고 그 방만 남아야 한다."""
     lv, views = headless["levels"], headless["views"]

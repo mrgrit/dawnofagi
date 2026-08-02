@@ -598,6 +598,15 @@ function drawLevel(lv, alpha){
         "#8fa3b7", 11*Math.max(.85,S.cam.z));
 
   slab(lv.core.x, G.SD, lv.cols-G.LOUNGE-1.4, G.COR, lv.level, 0.35, "#1d2630", "#28323d");
+
+  // 바닥은 **방·팀보다 먼저** 등록한다. 히트 판정은 나중 것이 위(그린 순서 = 깊이)라,
+  // 바닥을 나중에 넣으면 방을 눌러도 바닥이 가로채 아무 일도 안 일어난다.
+  S.hit.push({ poly:slab(lv.x0, lv.y0, w, d, lv.level, 0, null, null),
+    go:()=>{ S.view="floor"; S.div=lv.f.division_id; S.agent=null; S.room={kind:"", id:""};
+             S.sel = { kind:"floor", id:lv.f.division_id }; focusLevel(lv.level); draw(); },
+    tip:()=>"<b>" + esc(lv.f.name) + "</b><br>run " + lv.f.runs + " · 스텝 " + lv.f.activity +
+            "<br><i>클릭하면 이 층으로</i>" });
+
   drawSectors(lv, al);
   drawTeams(lv);
   drawLounge(lv);
@@ -610,11 +619,6 @@ function drawLevel(lv, alpha){
         P(lv.x0+0.4, lv.y0+0.2, lv.level, G.WALL+3), "#5d6d7e",
         10.5*Math.max(.8,S.cam.z), "left");
 
-  S.hit.push({ poly:slab(lv.x0, lv.y0, w, d, lv.level, 0, null, null),
-    go:()=>{ S.view="floor"; S.div=lv.f.division_id; S.agent=null;
-             S.sel = { kind:"floor", id:lv.f.division_id }; focusLevel(lv.level); draw(); },
-    tip:()=>"<b>" + esc(lv.f.name) + "</b><br>run " + lv.f.runs + " · 스텝 " + lv.f.activity +
-            "<br><i>클릭하면 이 층으로</i>" });
   ctx.globalAlpha = 1;
 }
 
