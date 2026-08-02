@@ -21,3 +21,9 @@ notes: |
   이 사업은 status:planned 이지만 매니페스트로 미리 등록해 둔다.
   덕분에 조직·게이트·EG 설계가 사업 개시 전에 검증된다 (COMPANY.md §4-4 "사업은 플러그인").
   판정 모델은 피감시 모델과 분리해야 한다(담합 방지) — 자사 모델을 AOC judge 로 쓸 때 특히 주의.
+
+# 인프라 등급 (P7) — 학습·평가는 GPU 서버가 필요하다. 컨테이너로 안 된다.
+infra:
+  default: server
+  allowed: [vm, server]
+  notes: 학습 데이터가 L3 라 로컬 GPU 서버 전용. 클라우드 불가 (pol:l3-local-only).

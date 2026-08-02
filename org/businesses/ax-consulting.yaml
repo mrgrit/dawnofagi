@@ -20,3 +20,10 @@ kpis:
 notes: |
   대학 AX 참조 산출물(전공별 AI 접목 방향, X+AI 발표자료, 물류/조리 시뮬레이터 데모)은
   docs/references/ax-university/ 에 색인되어 있다.
+
+# 인프라 등급 (P7) — 컨설팅은 단계마다 다르다.
+# 데모/PoC 는 컨테이너 하나면 되고, 프로덕트 구축은 VM 또는 전용 서버다.
+infra:
+  default: container
+  allowed: [none, container, vm, server]
+  notes: 진단·리포트는 none. 데모·시뮬레이터는 container. 프로덕트 구축·이관은 vm 이상.

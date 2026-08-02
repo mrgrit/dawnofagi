@@ -18,3 +18,10 @@ kpis:
   - {name: 오탐율,        target: 5,   unit: percent, direction: down}
   - {name: MTTD,          target: 300, unit: seconds, direction: down}
   - {name: MTTR,          target: 1800, unit: seconds, direction: down}
+
+# 인프라 등급 (P7) — 관제 플랫폼은 고객 테넌트마다 **서버**가 붙는다.
+# 자사 테넌트 #0 개발·검증은 컨테이너로도 된다.
+infra:
+  default: server
+  allowed: [container, vm, server]
+  notes: 고객 온보딩은 서버. 자사 개발·데모는 컨테이너. 상시 관제라 VM 이상이 기본선.

@@ -2,35 +2,100 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Business manifest — org/businesses/*.yaml",
   "type": "object",
-  "required": ["id", "name", "status", "mission", "revenue_model", "owning_divisions"],
+  "required": [
+    "id",
+    "name",
+    "status",
+    "mission",
+    "revenue_model",
+    "owning_divisions"
+  ],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "name": { "type": "string", "minLength": 1 },
-    "name_en": { "type": "string" },
-    "status": { "enum": ["active", "planned", "paused", "retired"] },
-    "mission": { "type": "string", "minLength": 5 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name_en": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "planned",
+        "paused",
+        "retired"
+      ]
+    },
+    "mission": {
+      "type": "string",
+      "minLength": 5
+    },
     "revenue_model": {
-      "type": "array", "minItems": 1,
-      "items": { "type": "string", "pattern": "^[a-z0-9_]+$" }
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]+$"
+      }
     },
     "owning_divisions": {
-      "type": "array", "minItems": 1,
-      "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" }
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+      }
     },
-    "target_segments": { "type": "array", "items": { "type": "string" } },
-    "tenant_model": { "enum": ["single", "multi"] },
-    "data_sensitivity": { "enum": ["L0", "L1", "L2", "L3"] },
+    "target_segments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tenant_model": {
+      "enum": [
+        "single",
+        "multi"
+      ]
+    },
+    "data_sensitivity": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ]
+    },
     "roadmap": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["phase", "goal", "status"],
+        "required": [
+          "phase",
+          "goal",
+          "status"
+        ],
         "additionalProperties": false,
         "properties": {
-          "phase": { "type": "string" },
-          "goal": { "type": "string" },
-          "status": { "enum": ["done", "in_progress", "planned", "blocked"] }
+          "phase": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "done",
+              "in_progress",
+              "planned",
+              "blocked"
+            ]
+          }
         }
       }
     },
@@ -38,16 +103,67 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "target", "unit"],
+        "required": [
+          "name",
+          "target",
+          "unit"
+        ],
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string" },
-          "target": { "type": "number" },
-          "unit": { "type": "string" },
-          "direction": { "enum": ["up", "down"] }
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "up",
+              "down"
+            ]
+          }
         }
       }
     },
-    "notes": { "type": "string" }
+    "notes": {
+      "type": "string"
+    },
+    "infra": {
+      "type": "object",
+      "description": "이 사업의 작업이 요구하는 인프라 등급 (P7 DoD-3). 사업마다 다르다 — AOC 플랫폼은 서버가 붙어야 하고, AX 데모는 컨테이너면 되고, AX 프로덕트는 VM 이상이다. 작업 지시가 allowed 중 하나를 고르고, **고른 등급이 결재 라인을 결정한다** (vm 이상은 대표이사).",
+      "properties": {
+        "default": {
+          "enum": [
+            "none",
+            "container",
+            "vm",
+            "server"
+          ]
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "none",
+              "container",
+              "vm",
+              "server"
+            ]
+          },
+          "minItems": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "default",
+        "allowed"
+      ],
+      "additionalProperties": false
+    }
   }
 }
