@@ -42,16 +42,38 @@ def test_ratecard_prices_cloud_tokens(tmp_path):
     assert s.complete and s.total == s.model_cost
 
 
-def test_local_model_is_unpriced_not_free(tmp_path):
-    """로컬이라 0 원이 아니다 — GPU 전력·감가상각을 아직 안 따진 것이다.
-    0 으로 두면 "로컬은 공짜"라는 잘못된 신호가 KPI 로 간다."""
+def test_local_model_is_priced_by_time_not_tokens():
+    """전용 GPU 는 쓰든 안 쓰든 같은 값이 든다. 토큰당으로 매기면 **같은 일의
+    원가가 처리량 편차만큼 흔들린다** — 실측(2026-08-02)에서 같은 gpt-oss:120b 가
+    3.7 ~ 12.8 tok/s 로 3.5배 차이 났다. 장비는 시간을 산다."""
     u = _usage(by_model={"gpt-oss:120b": {"in": 500_000, "out": 100_000,
-                                          "runs": 1, "local": 1}})
+                                          "runs": 1, "local": 1}},
+               local_gpu_ms=3_600_000)
     s = settle(ROOT, u)
-    assert s.model_cost == 0
-    assert not s.complete, "값을 못 매겼는데 완결로 보고했다"
-    assert any("로컬" in x for x in s.unpriced)
-    assert any("500,000" in x for x in s.unpriced), "쓴 양은 남아야 한다"
+    assert not s.complete, "GPU 시간당 원가가 미정인데 완결로 보고했다"
+    assert any("점유 1.00h" in x for x in s.unpriced), "잰 시간이 안 남았다"
+    assert any("600,000 토큰" in x for x in s.unpriced), "쓴 양도 남아야 한다"
+
+
+def test_local_use_without_measured_time_is_not_silently_free():
+    """시간으로 잡기로 한 뒤 생긴 구멍 — 점유 시간이 없으면 0 원이 되어 사라진다."""
+    u = _usage(by_model={"gpt-oss:120b": {"in": 1_000, "out": 1_000, "runs": 1,
+                                          "local": 1}}, local_gpu_ms=0)
+    s = settle(ROOT, u)
+    assert not s.complete and any("점유 시간 미측정" in x for x in s.unpriced)
+
+
+def test_hourly_rate_is_derived_not_typed_in():
+    """시간당 원가를 사람이 직접 적게 두면 구입가를 바꿔도 안 따라온다.
+    입력은 견적서·고지서에서 읽을 수 있는 것만 받는다."""
+    from dawn_biz.records import UNSET, hourly
+
+    rc = {"electricity_krw_kwh": 140,
+          "hardware": {"g": {"구입가": 30_000_000, "수명연수": 5, "소비전력w": 1200}}}
+    # 3천만 / (5×8760) = 685 · 1.2kW × 140 = 168  → 853
+    assert round(hourly(rc, "g")) == 853
+    assert hourly({**rc, "electricity_krw_kwh": UNSET}, "g") == UNSET,         "전기요금이 빠졌는데 0 으로 치고 계산했다"
+    assert hourly(rc, "없는장비") == UNSET
 
 
 def test_unknown_model_is_flagged_not_silently_zero():
@@ -77,7 +99,8 @@ def test_total_is_a_lower_bound_when_anything_is_unpriced():
     u = _usage(by_model={"claude-opus-5": {"in": 1_000_000, "out": 0, "runs": 1,
                                            "local": 0},
                          "gpt-oss:120b": {"in": 9_000_000, "out": 0, "runs": 1,
-                                          "local": 1}})
+                                          "local": 1}},
+               local_gpu_ms=600_000)
     s = settle(ROOT, u)
     assert s.total > 0 and not s.complete
 

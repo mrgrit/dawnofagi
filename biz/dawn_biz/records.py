@@ -39,6 +39,7 @@ class Usage:
     tokens_out: int = 0
     by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     wall_ms: int = 0
+    local_gpu_ms: int = 0           # 사내 GPU 점유 — 로컬 모델은 시간으로 잡는다
     tool_calls: int = 0
     blocked: int = 0
     infra_tier: str = "none"
@@ -96,6 +97,8 @@ def usage(root: Path, order_id: int) -> Usage:
         u.tokens_in += r.tokens_in
         u.tokens_out += r.tokens_out
         u.wall_ms += int(r.duration_ms or 0)
+        if r.model_local:
+            u.local_gpu_ms += int(r.duration_ms or 0)
         u.tool_calls += int(r.tool_calls or 0)
         u.blocked += len(r.blocked or [])
         m = u.by_model.setdefault(r.model or "(미상)",
@@ -127,6 +130,45 @@ def rates(root: Path) -> dict[str, Any]:
     return yaml.safe_load(f.read_text(encoding="utf-8")) or {} if f.is_file() else {}
 
 
+def hourly(rc: dict[str, Any], name: str) -> float | str:
+    """장비 하나의 **시간당 원가.** 채워진 값에서 계산한다 — 따로 적지 않는다.
+
+        시간당 = 구입가 / (수명연수 × 8760) + 소비전력W / 1000 × 전기요금
+
+    시간당 원가를 사람이 직접 적게 두면 구입가를 바꿔도 안 따라온다. 입력은
+    **견적서와 고지서에서 읽을 수 있는 것**만 받고 나머지는 여기서 낸다.
+    하나라도 미정이면 결과가 `미정` 이다 — 빠진 항을 0 으로 치면 원가가 싸게 잡힌다.
+    """
+    hw = ((rc.get("hardware") or {}).get(name)) or {}
+    if not hw:
+        return UNSET
+    price, life = hw.get("구입가"), hw.get("수명연수")
+    watt, kwh = hw.get("소비전력w"), rc.get("electricity_krw_kwh")
+    if any(not isinstance(v, (int, float)) for v in (price, life, watt, kwh)):
+        return UNSET
+    if not life:
+        return UNSET
+    return price / (life * 8760) + (watt / 1000) * kwh
+
+
+def _infra_hourly(rc: dict[str, Any], tier: str) -> float | str:
+    """등급 → 시간당 원가. 등급은 **장비를 가리키고**, 값은 그 장비에서 나온다."""
+    v = (rc.get("infra_hour") or {}).get(tier, UNSET)
+    if isinstance(v, (int, float)):
+        return v                                # 직접 적힌 값 (예: none: 0)
+    if not isinstance(v, str) or v == UNSET:
+        return UNSET
+    h = hourly(rc, v)                           # 장비 이름을 가리킨다
+    if h == UNSET or tier != "container":
+        return h
+    # 컨테이너는 호스트 하나를 여럿이 나눠 쓴다 — 정원으로 나눈다.
+    from dawn_core.infrapool import load_pool
+    from dawn_core.paths import Paths
+
+    cap = int((load_pool(Paths().root)[0] or {}).get("container_max", 0) or 0)
+    return h / cap if cap else h
+
+
 def settle(root: Path, u: Usage) -> Settlement:
     """원가를 낸다. **단가가 `미정` 이면 0 으로 만들지 않고 미정으로 센다.**"""
     rc = rates(root)
@@ -135,11 +177,12 @@ def settle(root: Path, u: Usage) -> Settlement:
     mrates = rc.get("model") or {}
 
     for model, m in sorted(u.by_model.items()):
+        if m.get("local"):
+            continue                            # 로컬은 토큰이 아니라 시간으로 잡는다
         r = mrates.get(model)
         if r is None or not krw:
-            why = ("로컬 모델 원가 미산정 (GPU 전력·감가상각)"
-                   if m.get("local") else f"단가가 없는 모델: {model}")
-            s.unpriced.append(f"{model} — {why} · in {m['in']:,} / out {m['out']:,} 토큰")
+            s.unpriced.append(f"{model} — 단가가 없는 모델 · "
+                              f"in {m['in']:,} / out {m['out']:,} 토큰")
             continue
         cost = round((m["in"] / 1e6) * float(r["in_usd_1m"]) * krw
                      + (m["out"] / 1e6) * float(r["out_usd_1m"]) * krw)
@@ -147,11 +190,33 @@ def settle(root: Path, u: Usage) -> Settlement:
         s.lines.append({"what": model, "in": m["in"], "out": m["out"],
                         "krw": cost})
 
-    ih = (rc.get("infra_hour") or {}).get(u.infra_tier, UNSET)
+    # 로컬 모델 — **시간**으로 잡는다. 전용 GPU 는 쓰든 안 쓰든 같은 값이 들고,
+    # 토큰당으로 매기면 같은 일의 원가가 처리량 편차(실측 3.5배)만큼 흔들린다.
+    local_tok = sum(m["in"] + m["out"] for m in u.by_model.values()
+                    if m.get("local"))
+    if local_tok and not u.local_gpu_ms:
+        # 로컬을 썼는데 점유 시간이 없다. **조용히 0 원이 되면 안 된다** —
+        # 시간으로 잡는 방식으로 바꾼 뒤 생긴 구멍이라 명시적으로 막는다.
+        s.unpriced.append(f"로컬 모델 — GPU 점유 시간 미측정 · {local_tok:,} 토큰")
+    elif u.local_gpu_ms:
+        hrs = u.local_gpu_ms / 3_600_000
+        gh = hourly(rc, rc.get("gpu_source", ""))
+        if gh == UNSET:
+            s.unpriced.append(
+                f"로컬 모델 — GPU 시간당 원가 미정 (구입가·소비전력·전기요금) · "
+                f"점유 {hrs:.2f}h · {local_tok:,} 토큰")
+        else:
+            cost = round(float(gh) * hrs)
+            s.model_cost += cost
+            s.lines.append({"what": "로컬 모델 (GPU 점유)", "hours": round(hrs, 2),
+                            "krw": cost})
+
+    ih = _infra_hourly(rc, u.infra_tier)
     if u.infra_tier == "none":
         pass                                    # 아무것도 안 잡았다 — 진짜 0
-    elif ih == UNSET or not isinstance(ih, (int, float)):
-        s.unpriced.append(f"인프라 {u.infra_tier} — 시간당 단가 미정 (Q9-③)")
+    elif ih == UNSET:
+        s.unpriced.append(f"인프라 {u.infra_tier} — 시간당 원가 미정 "
+                          "(장비 구입가·소비전력·전기요금)")
     elif u.infra_hours:
         cost = round(float(ih) * u.infra_hours)
         s.infra_cost += cost

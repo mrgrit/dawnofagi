@@ -92,13 +92,22 @@ class Allocation:
 # ── 재고 (사람이 쓴다) ────────────────────────────────────────────────────
 
 
-def load_pool(root: Path) -> tuple[dict[str, Any], list[Host]]:
-    """`infra/pool.yaml` — 한도와 장비 목록. **읽기만 한다.**"""
+def pool_doc(root: Path) -> dict[str, Any]:
+    """`infra/pool.yaml` 원문. **읽기만 한다.**
+
+    `load_pool` 은 한도·장비만 돌려주므로 `routing` 같은 최상위 키를 보려면
+    여기를 쓴다 — 실측으로 `load_pool(root)[0].get("routing")` 이 **항상 빈 값**이라
+    경로를 열어도 인정되지 않는 버그가 있었다(limits 딕셔너리를 뒤지고 있었다).
+    """
     import yaml
 
     f = Path(root) / "infra" / "pool.yaml"
-    doc = yaml.safe_load(f.read_text(encoding="utf-8")) if f.is_file() else {}
-    doc = doc or {}
+    return (yaml.safe_load(f.read_text(encoding="utf-8")) if f.is_file() else {}) or {}
+
+
+def load_pool(root: Path) -> tuple[dict[str, Any], list[Host]]:
+    """`infra/pool.yaml` — 한도와 장비 목록. **읽기만 한다.**"""
+    doc = pool_doc(root)
     hosts = []
     for h in doc.get("hosts") or []:
         known = {k: v for k, v in h.items() if k in Host.__dataclass_fields__}
@@ -146,6 +155,29 @@ def available(root: Path, kind: str) -> list[Host]:
             if h.kind == kind and h.status == "available" and h.id not in taken]
 
 
+# ── 존 경유 (Q10) ────────────────────────────────────────────────────────
+
+
+def transit_open(root: Path, zone: str) -> bool:
+    """외부 장비(물리 LAN)가 이 컨테이너 존에 닿을 수 있나.
+
+    **결정 (Q10): 이 호스트를 게이트웨이로 쓰되 pipe 존을 거친다.**
+
+    다른 안은 각각 대가가 있었다. 오버레이(swarm/VXLAN)로 같은 L2 를 만들면
+    깔끔하지만 el34 랩 구성을 건드려야 하고, 존을 아예 분리하면 hand-off 가
+    파일 교환으로 제한된다. 호스트 라우팅은 **pipe 존이 PEP 라는 통제 평면의
+    전제를 그대로 유지한다** — 존을 넘는 트래픽이 검사 지점을 지난다는 것.
+
+    다만 **경로를 여는 것은 방화벽 변경이라 사람이 한다** (05_conventions 규칙 2).
+    여기서는 "열렸다고 적혀 있는가"만 본다. 적혀 있는데 실제로 안 열려 있으면
+    작업이 실패하지만, 그건 **시끄러운 실패**다 — 조용히 안 닿는 것보다 낫다.
+    """
+    routing = pool_doc(root).get("routing") or {}
+    if not routing.get("enabled"):
+        return False
+    return zone in (routing.get("zones") or [])
+
+
 # ── 능력 탐지 ────────────────────────────────────────────────────────────
 
 
@@ -188,12 +220,13 @@ def _check_rules(root: Path, *, tier: str, zone: str, business: str,
     if tier in ("vm", "server"):
         _limits, hosts = load_pool(root)
         zones = {h.zone for h in hosts if h.kind == tier}
-        if zones and zone not in zones:
-            # 외부 장비는 물리 LAN 에 있다. 컨테이너 존을 달라고 하면 이 호스트를
-            # 경유하는 L3 라우팅이 필요한데 아직 정해지지 않았다 (QUESTIONS Q10).
+        if zones and zone not in zones and not transit_open(root, zone):
+            # 외부 장비는 물리 LAN, 컨테이너 존은 도커 브리지다. 이 호스트를
+            # 경유하는 경로가 **실제로 열려 있어야** 닿는다 (QUESTIONS Q10).
             raise PoolError(
                 f"풀에 {zone} 존의 {tier} 장비가 없다 (있는 존: {', '.join(sorted(zones))}). "
-                "외부 장비가 컨테이너 존(10.20.x)에 닿으려면 라우팅이 먼저다 — Q10")
+                f"외부 장비가 {zone}(도커 브리지)에 닿으려면 pipe 경유 경로가 먼저다 — "
+                "infra/el34/route-external.sh 로 열고 pool.yaml 의 routing 에 적는다 (Q10)")
 
     if business:
         from .workintake import validate
@@ -231,6 +264,13 @@ def plan(root: Path, *, order_id: int, tier: str, zone: str = "",
 
     free = available(root, tier)
     matching = [h for h in free if h.zone == zone] if zone else free
+    via = ""
+    if not matching and zone and transit_open(root, zone):
+        # 존이 달라도 **경로가 열려 있다고 선언돼 있으면** 쓸 수 있다 (Q10).
+        # 열렸다는 선언과 실제로 열린 것은 다르다 — 아니면 여기서 잡고 나중에
+        # 시끄럽게 실패한다. 조용히 안 닿는 것보다 낫다.
+        matching = free
+        via = " · pipe 경유"
     if not matching:
         a.state = "waiting"
         a.reason = (f"풀에 가용한 {tier} 가 없다 — infra/pool.yaml 에 장비를 등록하거나 "
@@ -238,7 +278,7 @@ def plan(root: Path, *, order_id: int, tier: str, zone: str = "",
         return a
     h = matching[0]
     a.host_id, a.state = h.id, "ready"
-    a.reason = f"{h.address or h.id} · {h.cpu}vCPU/{h.memory_gb}GB"
+    a.reason = f"{h.address or h.id} · {h.cpu}vCPU/{h.memory_gb}GB{via}"
     return a
 
 

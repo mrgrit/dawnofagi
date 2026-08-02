@@ -302,3 +302,48 @@ def test_release_does_not_rewrite_a_finished_order(pool_root):
         s.set_work_order_status(wid, st)
     deprovision(s, pool_root, wid)
     assert s.work_order(wid)["status"] == "done"
+
+
+# ── 존 경유 (Q10) ────────────────────────────────────────────────────────
+
+
+def _open_transit(pool_root, zones: str):
+    """`routing` 은 최상위 키다 — 실측으로 `load_pool(root)[0]` (limits) 를 뒤지는
+    버그가 있어서 경로를 열어도 인정되지 않았다."""
+    f = pool_root / "infra" / "pool.yaml"
+    f.write_text(f.read_text(encoding="utf-8")
+                 + f"\nrouting:\n  enabled: true\n  zones: [{zones}]\n  via: pipe\n",
+                 encoding="utf-8")
+
+
+def test_transit_is_closed_unless_declared(pool_root):
+    """기본은 닫힘. 전부 여는 기본값을 두지 않는다."""
+    from dawn_core.infrapool import transit_open
+
+    assert transit_open(pool_root, "dmz") is False
+
+
+def test_only_declared_zones_are_reachable(pool_root):
+    from dawn_core.infrapool import transit_open
+
+    _open_transit(pool_root, "dmz")
+    assert transit_open(pool_root, "dmz") is True
+    assert transit_open(pool_root, "int") is False, "선언 안 한 존이 열렸다"
+
+
+def test_declared_transit_makes_a_lan_host_allocatable(pool_root):
+    """경로를 열었다고 적으면 존이 달라도 쓸 수 있어야 한다 — 안 그러면
+    `transit_open` 이 검사만 통과시키고 **실제로는 아무것도 못 잡는다.**"""
+    from dawn_core.infrapool import PoolError, allocate
+
+    f = pool_root / "infra" / "pool.yaml"
+    f.write_text(f.read_text(encoding="utf-8").replace("zone: dmz\n    address",
+                                                       "zone: lan\n    address"),
+                 encoding="utf-8")
+    with pytest.raises(PoolError, match="Q10"):          # 열기 전
+        allocate(pool_root, order_id=21, tier="server", zone="dmz", approved=True)
+
+    _open_transit(pool_root, "dmz")
+    a = allocate(pool_root, order_id=21, tier="server", zone="dmz", approved=True)
+    assert a.state == "ready" and a.host_id == "node-01"
+    assert "pipe 경유" in a.reason, "경유로 잡혔다는 사실이 안 남았다"
