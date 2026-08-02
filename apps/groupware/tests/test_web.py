@@ -907,3 +907,56 @@ def test_internal_order_must_name_a_division(portal, users):
                                 "division": "", "infra_tier": "none",
                                 "body": "", "_csrf": tok})
     assert "담당 본부를 골라야" in r.text
+
+
+# ── 통제 평면 웹 조정 ─────────────────────────────────────────────────────
+
+
+def test_control_page_needs_the_capability(portal, users):
+    """통제 평면은 에이전트의 행동을 바꾼다 — 아무나 못 본다."""
+    c, _ = _login(portal, "admin")
+    assert c.get("/control").status_code == 200
+
+    plain = next((u for u in users.list() if not u.can("control.view")), None)
+    if plain is None:
+        pytest.skip("control.view 없는 계정이 없다")
+    c2, _ = _login(portal, plain.username)
+    assert c2.get("/control").status_code in (403, 302, 303)
+
+
+def test_viewer_cannot_write(portal, users, root):
+    """열람만 있는 사람이 POST 로 곧장 쏘면 막혀야 한다 — 화면에서 버튼을 숨기는
+    것은 통제가 아니다."""
+    from dawn_groupware.auth import UserStore
+
+    st = UserStore(root)
+    if st.get("cp-viewer") is None:
+        st.create("cp-viewer", "12341234", name="[테스트] 열람자", org="test",
+                  capabilities=["portal.view", "control.view"])
+    try:
+        c, _ = _login(portal, "cp-viewer")
+        tok = re.search(r'name="_csrf" value="([^"]+)"',
+                        c.get("/control/soul/ax-univ-diag-01").text)
+        r = c.post("/control/soul/ax-univ-diag-01",
+                   data={"text": "덮어쓰기", "_reason": "무단",
+                         "_csrf": tok.group(1) if tok else "x"})
+        assert r.status_code == 403
+        assert "덮어쓰기" not in (root / "org" / "agents" / "ax-univ-diag-01"
+                                / "SOUL.md").read_text(encoding="utf-8")
+    finally:
+        st.delete("cp-viewer")      # 알려진 비밀번호를 가진 계정을 남기지 않는다
+
+
+def test_saving_a_widened_gate_is_refused_through_http(portal, users, root):
+    """UI 를 거쳐도 경계는 넓어지지 않는다."""
+    p = root / "org" / "divisions" / "ax" / "university" / "gate.yaml"
+    before = p.read_text(encoding="utf-8")
+    c, _ = _login(portal, "admin")
+    tok = re.search(r'name="_csrf" value="([^"]+)"',
+                    c.get("/control/gate/ax-university").text).group(1)
+    r = c.post("/control/gate/ax-university",
+               data={"text": before.replace("  allow:", "  allow:\n    - pay.execute"),
+                     "_reason": "넓히기", "_csrf": tok})
+    assert r.status_code == 400
+    assert "저장하지 않았다" in r.text
+    assert p.read_text(encoding="utf-8") == before, "파일이 바뀐 채 남았다"

@@ -142,12 +142,15 @@ itops-datacenter · itops-support
 L2 는 그 팀 에이전트 전체의 행동 규칙이라 **자동 생성하지 않기로 했다.** 필요한
 팀부터 하나씩 쓴다 — `ax-university` 가 그 방식의 본보기다(L2 + gate + L3 + L4).
 
+**이제 서버에 안 들어가고 그룹웨어에서 쓸 수 있다** — `/control` → `team/<팀id>`.
+없는 L2 는 "아직 없다"로 표시되고, 저장하면 새로 만들어진다.
+
 **우선순위는 실제 업무가 정한다.** 다음 고객이 보안 AX 면 `ax-security`, 상시
 시스템운영을 에이전트에게 넘길 거면 `itops-support` 가 먼저다.
 
 ### T11. 대학 AX 의 SOP 두 개가 비어 있다
 
-**누가**: 에이전트
+**누가**: 에이전트 또는 사람 (`/control` → `work/…`)
 
 `work/consulting/` 에 진단(`ax-diagnosis`)만 있다. 참조 색인이 제안한 3분해 중
 나머지 둘 — 커리큘럼 설계 · 시뮬레이터 구축 — 은 **입력이 진단서라 순서가 있어서**
@@ -200,6 +203,7 @@ KPI 가 의미를 갖는다. 그때 자율화 등급(현재 전원 A1) 승급을
 
 ```bash
 make ops-status     # 전 계층 한 장 (조직·에이전트·업무·인프라·상시·관제)
+# 통제 평면 조정은 그룹웨어에서:  http://<호스트>:8811/control
 make standing       # 상시 작업 마지막 회차
 make verify-p7      # 작업 지시 파이프라인 E2E
 make check          # lint + test + control-lint + registry (CI 와 동일)

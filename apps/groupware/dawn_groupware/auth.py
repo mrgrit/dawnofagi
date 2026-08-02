@@ -45,6 +45,8 @@ CAPABILITIES = {
     "hitl.approve.critical": "최고 심각도(비가역·L3) 승인",
     "eg.view": "EG(페르소나·정책) 열람",
     "eg.edit": "EG 조정 — 사람이 에이전트에 개입하는 주 통로",
+    "control.view": "통제 평면 열람 (L2·L3·L4 문서와 경계)",
+    "control.edit": "통제 평면 조정 — 에이전트 추가·삭제, 규칙·경계 수정",
     "aoc.view": "관제 콘솔·픽셀 오피스 접근",
     "aoc.control": "킬 스위치 조작 (일시중지·격리·종료)",
     "admin": "계정 관리",
@@ -159,6 +161,19 @@ class UserStore:
         data[username] = u.to_dict()
         self._save(data)
         return u
+
+    def delete(self, username: str) -> bool:
+        """계정을 지운다. 없으면 False.
+
+        **비활성화(`set_disabled`)와 다르다.** 퇴사·오생성처럼 흔적을 남길 이유가
+        없을 때만 쓴다 — 감사 로그의 행위자 이름은 계정을 지워도 남는다.
+        """
+        data = self._load()
+        if username not in data:
+            return False
+        del data[username]
+        self._save(data)
+        return True
 
     def set_capabilities(self, username: str, caps: list[str]) -> User:
         unknown = [c for c in caps if c not in CAPABILITIES]

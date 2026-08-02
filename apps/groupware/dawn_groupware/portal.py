@@ -186,6 +186,7 @@ def _sidebar(request: Request, user: User, current: str) -> Safe:
         ("개입", "", "", None),
         ("/approvals", "승인 큐", "hitl.view", str(pending) if pending else None),
         ("/eg", "EG 조정", "eg.view", None),
+        ("/control", "통제 평면", "control.view", None),
         ("/aoc", "관제", "aoc.view", None),
         ("업무", "", "", None),
         ("/", "대시보드", "portal.view", None),
@@ -587,6 +588,270 @@ async def approval_decide(request: Request) -> Response:
                           agent_id=ap.agent_id, agent_org=agent_org,
                           severity=ap.severity, assets=ap.assets, note=note)
     return RedirectResponse(f"/approvals/{aid}", status_code=303)
+
+
+# ── 통제 평면 조정 ────────────────────────────────────────────────────────
+#
+# **서버에 안 들어가고 웹에서 고친다.** 고치기 어려운 통제는 안 고쳐지고,
+# 안 고쳐지는 통제는 현실과 어긋난다 (CLAUDE.md 규칙 7).
+#
+# 규칙과 롤백은 `cpedit.py` 에 있다. 여기는 화면과 감사만 한다 —
+# 검증을 화면에서 하면 CLI 로 부를 때 그 검증이 빠진다.
+
+
+def _cp_targets(request: Request):
+    from . import cpedit
+
+    return cpedit.targets(_root(request))
+
+
+@require("control.view")
+async def control_index(request: Request) -> Response:
+    from . import cpedit
+
+    user: User = request.state.user
+    ts = _cp_targets(request)
+    by_kind: dict[str, list] = {}
+    for t in ts:
+        by_kind.setdefault(t.kind, []).append(t)
+
+    cards = []
+    for kind, spec in cpedit.LAYERS.items():
+        items = by_kind.get(kind, [])
+        missing = [x for x in items if not x.exists]
+        rows = []
+        for x in items:
+            mark = (Safe(" ") + span("없음", class_="tag")) if not x.exists else Safe("")
+            rows.append(li(a(x.id, href=f"/control/{kind}/{h(x.id)}"), " ",
+                           small(x.label, class_="dim"), mark))
+        cards.append(div(
+            h3(spec["label"]),
+            p(spec["hint"], class_="dim small"),
+            p(f"{len(items)}건" + (f" · 미작성 {len(missing)}" if missing else ""),
+              class_="dim small"),
+            ul(*rows),
+            class_="card"))
+
+    body = join([
+        h1("통제 평면"),
+        p("에이전트의 행동 규칙과 경계를 여기서 고친다. 서버에 들어갈 필요가 없다.",
+          class_="lede"),
+        div(Safe("<b>저장 전에 컴파일한다.</b> 레지스트리 무결성과 4계층 컴파일을 "
+                 "통과해야 남는다 — <b>경계를 넓히려 하면 단조 축소에 걸려 되돌아간다.</b> "
+                 "L1(COMPANY.md)은 여기서 못 고친다. 전사 헌법은 git 리뷰를 거친다."),
+            class_="flash warn"),
+        _agent_new_form(request) if user.can("control.edit") else None,
+        div(*cards, class_="grid c2"),
+    ])
+    return _shell(request, user, "통제 평면", body, current="/control")
+
+
+def _agent_new_form(request: Request) -> Safe:
+    from dawn_core import Registry
+
+    reg = Registry.load(_root(request))
+    # L2 가 있는 팀만 고를 수 있다 — 규칙 없이 일하는 팀에 사람을 넣지 않는다.
+    teams = [(t.id, f'{t.data.get("name", t.id)} ({t.id})')
+             for t in sorted(reg.teams.values(), key=lambda x: x.id)
+             if (t.dir / "AGENT_TEAM.md").is_file()]
+    works = [(w, w) for w in sorted(reg.works)]
+    return Safe('<details class="card"><summary>에이전트 추가</summary>'
+                '<form class="stack" method="post" action="/control/agents" '
+                'style="margin-top:10px">') + join([
+        csrf_field(request),
+        Safe('<div><label for="a-id">id</label>')
+        + input_(type="text", id="a-id", name="agent_id", required=True,
+                 placeholder="corp-hr-clerk-01", pattern="[a-z0-9]+(-[a-z0-9]+)*")
+        + Safe("</div>"),
+        Safe('<div><label for="a-name">이름</label>')
+        + input_(type="text", id="a-name", name="name", required=True) + Safe("</div>"),
+        Safe('<div><label for="a-team">팀</label>')
+        + select("team", teams, "", id="a-team", required=True)
+        + Safe('<small class="dim">L2(AGENT_TEAM.md)가 있는 팀만 나온다</small></div>'),
+        Safe('<div><label for="a-work">업무 SOP</label>')
+        + select("works", works, "", id="a-work", multiple=True, size="4")
+        + Safe("</div>"),
+        Safe('<div><label for="a-tools">선언 도구 (쉼표)</label>')
+        + input_(type="text", id="a-tools", name="tools",
+                 value="eg.search, eg.record, skill.preview, doc.search")
+        + Safe('<small class="dim">팀 경계를 넘는 도구는 저장되지 않는다</small></div>'),
+        Safe('<div><label for="a-zone">존</label>')
+        + select("zone", [(z, z) for z in ("dmz", "user", "int", "ext")], "dmz",
+                 id="a-zone") + Safe("</div>"),
+        Safe('<div><label for="a-auto">자율 등급</label>')
+        + select("autonomy", [(x, x) for x in ("A0", "A1", "A2")], "A1", id="a-auto")
+        + Safe("</div>"),
+        Safe('<div><label for="a-why">사유 *</label>')
+        + input_(type="text", id="a-why", name="_reason", required=True,
+                 maxlength="500", placeholder="왜 이 에이전트가 필요한가")
+        + Safe("</div>"),
+        Safe('<div><button type="submit" name="op" value="create">만들기</button></div>'),
+    ]) + Safe("</form></details>")
+
+
+@require("control.view")
+async def control_edit(request: Request) -> Response:
+    from . import cpedit
+
+    user: User = request.state.user
+    kind = request.path_params["kind"]
+    ident = request.path_params["ident"]
+    try:
+        t = cpedit.resolve(_root(request), kind, ident)
+        text = cpedit.read(_root(request), kind, ident)
+    except cpedit.CPEditError as e:
+        return _shell(request, user, "없음",
+                      join([h1("대상이 없다"), div(str(e), class_="flash bad"),
+                            p(a("← 통제 평면", href="/control"))]), status=404)
+
+    spec = cpedit.LAYERS[kind]
+    can = user.can("control.edit")
+    form = Safe("")
+    if can:
+        form = (Safe('<form class="stack" method="post" '
+                     f'action="/control/{h(kind)}/{h(ident)}">')
+                + join([
+                    csrf_field(request),
+                    textarea("text", text, rows="28", spellcheck="false",
+                             style="font-family:ui-monospace,monospace;font-size:13px"),
+                    Safe('<div><label for="c-why">변경 사유 *</label>')
+                    + input_(type="text", id="c-why", name="_reason", required=True,
+                             maxlength="500",
+                             placeholder="무엇을 왜 바꾸는가 — 감사 로그에 남는다")
+                    + Safe("</div>"),
+                    Safe('<div><button type="submit">저장</button> '
+                         '<a href="/control">취소</a></div>'),
+                ]) + Safe("</form>"))
+    else:
+        form = Safe('<pre class="card" style="overflow:auto">') \
+            + Safe(h(text or "(비어 있다)")) + Safe("</pre>")
+
+    danger = Safe("")
+    if can and kind == "agent" and t.exists:
+        danger = div(join([
+            Safe("<b>에이전트 삭제</b>"),
+            small("매니페스트·SOUL 을 지우고 팀 명부에서도 뺀다. 스냅샷은 남는다.",
+                  class_="dim"),
+            Safe(f'<form method="post" action="/control/agents" '
+                 f'onsubmit="return confirm(\'{h(ident)} 를 지운다. 계속?\')">')
+            + csrf_field(request)
+            + input_(type="hidden", name="agent_id", value=ident)
+            + Safe('<div><label for="d-why">사유 *</label>')
+            + input_(type="text", id="d-why", name="_reason", required=True)
+            + Safe("</div>")
+            + Safe('<div><button type="submit" name="op" value="delete" '
+                   'class="danger">삭제</button></div>')
+            + Safe("</form>"),
+        ]), class_="card")
+
+    body = join([
+        h1(f"{kind}/{ident}"),
+        p(spec["label"] + " — " + spec["hint"], class_="dim"),
+        small(str(t.path.relative_to(_root(request))), class_="dim"),
+        (div("이 파일은 아직 없다. 저장하면 새로 만들어진다.", class_="flash warn")
+         if not t.exists else None),
+        form,
+        danger,
+        p(a("← 통제 평면", href="/control")),
+    ])
+    return _shell(request, user, f"{kind}/{ident}", body, current="/control")
+
+
+@require("control.view")
+async def control_save(request: Request) -> Response:
+    from . import cpedit
+
+    user: User = request.state.user
+    if not user.can("control.edit"):
+        return _forbidden(request, user, "control.edit")
+    kind = request.path_params["kind"]
+    ident = request.path_params["ident"]
+    form = await request.form()
+    if not check_csrf(request, form):
+        return RedirectResponse(f"/control/{kind}/{ident}", status_code=303)
+
+    reason = str(form.get("_reason", "")).strip()[:500]
+    try:
+        res = cpedit.save(_root(request), kind, ident, str(form.get("text", "")),
+                          actor=user.username, reason=reason)
+    except cpedit.CPEditError as e:
+        _audit(request).write("control.save", actor=user.username,
+                              target=f"{kind}/{ident}", result="error",
+                              ip=_ip(request), reason=reason, error=str(e))
+        return _shell(request, user, "실패", join([
+            h1("저장하지 않았다"),
+            div(str(e), class_="flash bad"),
+            p("파일은 바뀌지 않았다. 검증을 통과해야 남는다.", class_="dim"),
+            p(a("← 돌아가기", href=f"/control/{kind}/{ident}")),
+        ]), status=400)
+
+    _audit(request).write("control.save", actor=user.username,
+                          target=f"{kind}/{ident}", result="ok", ip=_ip(request),
+                          reason=reason, validation=res.validation,
+                          lines=len(res.diff))
+    return _shell(request, user, "저장됨", join([
+        h1("저장됨"),
+        div(f"{kind}/{ident} — {res.validation}", class_="flash ok"),
+        (Safe('<pre class="card" style="overflow:auto">')
+         + Safe(h("\n".join(res.diff))) + Safe("</pre>") if res.diff else None),
+        p(a("← 통제 평면", href="/control"), " · ",
+          a("계속 고치기", href=f"/control/{kind}/{ident}")),
+    ]))
+
+
+@require("control.view")
+async def control_agents(request: Request) -> Response:
+    """에이전트 추가·삭제. **팀 명부까지 손대므로 한 곳에서만 한다.**"""
+    from . import cpedit
+
+    user: User = request.state.user
+    if not user.can("control.edit"):
+        return _forbidden(request, user, "control.edit")
+    form = await request.form()
+    if not check_csrf(request, form):
+        return RedirectResponse("/control", status_code=303)
+
+    op = str(form.get("op", ""))
+    reason = str(form.get("_reason", "")).strip()[:500]
+    aid = str(form.get("agent_id", "")).strip()
+    try:
+        if op == "delete":
+            res = cpedit.delete_agent(_root(request), aid, actor=user.username,
+                                      reason=reason)
+        elif op == "create":
+            res = cpedit.create_agent(
+                _root(request), agent_id=aid, team=str(form.get("team", "")),
+                name=str(form.get("name", "")).strip()[:120],
+                persona="", works=[str(x) for x in form.getlist("works")],
+                tools=[x.strip() for x in str(form.get("tools", "")).split(",")
+                       if x.strip()],
+                zone=str(form.get("zone", "dmz")),
+                autonomy=str(form.get("autonomy", "A1")),
+                actor=user.username, reason=reason)
+        else:
+            raise cpedit.CPEditError(f"알 수 없는 동작: {op}")
+    except cpedit.CPEditError as e:
+        _audit(request).write(f"control.agent.{op}", actor=user.username, target=aid,
+                              result="error", ip=_ip(request), reason=reason,
+                              error=str(e))
+        return _shell(request, user, "실패", join([
+            h1("반영하지 않았다"), div(str(e), class_="flash bad"),
+            p(a("← 통제 평면", href="/control")),
+        ]), status=400)
+
+    _audit(request).write(f"control.agent.{op}", actor=user.username, target=aid,
+                          result="ok", ip=_ip(request), reason=reason,
+                          validation=res.validation)
+    return _shell(request, user, "반영됨", join([
+        h1("반영됨"),
+        div(f"{aid} — {res.validation}", class_="flash ok"),
+        (p("SOUL.md 가 비어 있다. 판단 성향과 멈추는 순간을 채워라 — "
+           "비어 있으면 팀 규칙만 가지고 움직인다.", class_="dim")
+         if op == "create" else None),
+        p(a("← 통제 평면", href="/control"),
+          *((Safe(" · "), a("SOUL 쓰기", href=f"/control/soul/{h(aid)}"))
+            if op == "create" else ())),
+    ]))
 
 
 # ── EG 조정 ──────────────────────────────────────────────────────────────
@@ -1568,6 +1833,10 @@ routes = [
     Route("/approvals", approvals),
     Route("/approvals/{aid}", approval_detail, methods=["GET"]),
     Route("/approvals/{aid}", approval_decide, methods=["POST"]),
+    Route("/control", control_index),
+    Route("/control/agents", control_agents, methods=["POST"]),
+    Route("/control/{kind}/{ident}", control_edit, methods=["GET"]),
+    Route("/control/{kind}/{ident}", control_save, methods=["POST"]),
     Route("/eg", eg_index),
     Route("/eg/{kind}/{node_id}", eg_node, methods=["GET"]),
     Route("/eg/{kind}/{node_id}", eg_node_post, methods=["POST"]),
