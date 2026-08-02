@@ -1,0 +1,40 @@
+# 상시 작업 — 사람이 시키지 않아도 돌아야 하는 일 (P7 DoD-6).
+#
+# **상시 작업도 작업 지시다.** 기록·일지가 똑같이 남는다. 다른 점은 하나뿐 —
+# 결재가 **최초 1회**이고 그 뒤로는 주기가 돌린다. 매 회차마다 결재를 받으면
+# 관제가 사람의 응답 속도에 묶이고, 그러면 상시가 아니다.
+#
+# `action` 은 **미리 등록된 것만** 쓸 수 있다 (`dawn_biz.standing.ACTIONS`).
+# 임의의 셸 명령을 적게 두면 이 파일이 곧 원격 실행 창구가 된다.
+#
+# `every` 는 분 단위. 스케줄러를 새로 만들지 않는다 — cron/systemd 가
+# `dawn-biz standing --tick` 을 부르고, 무엇이 지금 돌 차례인지는 여기서 정한다.
+
+- id: aoc-cycle
+  title: 관제 1회전 — 수집 · 탐지 · 트리아지
+  action: aoc.cycle
+  division: aoc
+  every: 15
+  why: 탐지가 멈추면 공격이 아니라 **관제 공백**이 위험이다. 사람 없이 돌아야 한다.
+
+- id: work-intake
+  title: 접수함 흡수 — 홈페이지 문의 · 작업 요청
+  action: biz.intake
+  division: corp
+  every: 10
+  why: 공개 홈페이지는 사내 DB 에 못 쓴다(존 격리). 사내 쪽에서 **당겨 와야** 한다.
+
+- id: infra-retry
+  title: 준비대기 작업 이어받기
+  action: infra.retry
+  division: itops
+  every: 30
+  why: 장비를 넣거나 누가 반납하면 멈춰 있던 지시가 이어서 돌아야 한다.
+       사람이 다시 접수하는 것은 대기를 실패로 취급하는 것이다.
+
+- id: kpi-review
+  title: KPI · 자율화 검토
+  action: kpi.review
+  division: corp
+  every: 10080          # 주 1회
+  why: 자율화 등급을 올릴지 내릴지는 **측정된 수치**로 정한다. 인상으로 정하지 않는다.

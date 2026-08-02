@@ -200,6 +200,25 @@ def cmd_status(args) -> int:
           f"할당 {pool['allocated']}건")
     for w in pool["waiting"]:
         print(f"  {_t('준비대기', Y)} #{w['order_id']} {w['tier']} — {w['reason'][:70]}")
+
+    # 상시 작업 — **돌기만 하고 흔적이 없으면 안 돈 것과 구별이 안 된다.**
+    # 마지막 회차가 언제였는지가 여기 안 보이면 조용히 죽은 것을 아무도 못 찾는다.
+    from dawn_biz import standing
+
+    items = standing.load(root)
+    if items:
+        last = standing.state(root)                 # st 는 관제 상태다 — 가리지 않는다
+        ok = standing.approved_orders(root, biz)
+        bad = [i for i in items if (last.get(i.id) or {}).get("ok") is False]
+        never = [i for i in items if i.id not in last]
+        print(f"\n{B}상시 작업{Z}  {len(items)}건 · 승인 {len(ok)} · "
+              f"미실행 {len(never)} · 최근 실패 {len(bad)}")
+        for i in items:
+            r = last.get(i.id) or {}
+            when = r.get("at", "")[5:16].replace("T", " ") or "없음"
+            mark = _t("실패", R) if r.get("ok") is False else (
+                _t("미결재", Y) if i.id not in ok else "정상")
+            print(f"  {i.id:<14} {i.every:>5}분  마지막 {when:<12} {mark}")
     print(f"\n{B}관제{Z}  케이스 {len(st['cases'])} · "
           f"승인 대기 {len([x for x in st['hitl'] if x['status'] == 'pending'])} · "
           f"수집 {st['collect']['spans']} 스팬 / {st['collect']['tokens']:,} 토큰")

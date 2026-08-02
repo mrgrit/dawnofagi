@@ -248,3 +248,20 @@ def test_all_business_agents_are_under_control(root):
         st = ks.get(aid)
         assert st.agent_id == aid
         assert st.state in ("running", "paused", "killed", "isolated")
+
+
+def test_status_prints_every_layer_and_exits_clean(capsys):
+    """`make ops-status` 는 전 계층 현황 한 장이다 — 한 줄이라도 빠지면 그게 사각지대다.
+
+    실측: 상시 작업 블록에서 `st` 를 재사용해 관제 상태를 가렸더니 관제 섹션이
+    통째로 사라지고 `KeyError` 로 끝났다. 출력만 보면 앞부분이 멀쩡해서 눈에 안 띈다.
+    """
+    import argparse
+
+    from dawn_ops.cli import cmd_status
+
+    rc = cmd_status(argparse.Namespace(json=False))
+    out = capsys.readouterr().out
+    assert rc == 0
+    for section in ("조직", "에이전트", "업무 데이터", "인프라", "상시 작업", "관제"):
+        assert section in out, f"{section} 섹션이 없다"

@@ -324,6 +324,27 @@ biz-acct:  ## 경비·자산 대장 (L3) — make biz-acct ID=<request-id>
 biz-egcheck:  ## 업무 데이터 ↔ EG 자산 정합성 (어긋나면 실패)
 	@$(PY) -m dawn_biz.cli egcheck
 
+.PHONY: standing
+standing:  ## 상시 작업 현황 (P7 DoD-6)
+	@$(PY) -m dawn_biz.cli standing
+
+.PHONY: standing-tick
+standing-tick:  ## 상시 작업 1회전 — cron/systemd 가 부를 진입점
+	@$(PY) -m dawn_biz.cli standing --tick
+
+.PHONY: standing-cron
+standing-cron:  ## 상시 작업을 crontab 에 건다 (5분마다 tick · 차례는 안에서 정한다)
+	@line="*/5 * * * * cd $(CURDIR) && $(CURDIR)/$(PY) -m dawn_biz.cli standing --tick >> $(CURDIR)/var/biz/standing.log 2>&1"; \
+	 if crontab -l 2>/dev/null | grep -qF "dawn_biz.cli standing"; then \
+	   echo "이미 걸려 있다:"; crontab -l | grep -F "dawn_biz.cli standing"; \
+	 else \
+	   echo "$$line"; \
+	   printf '%s\n' "이 줄을 crontab 에 추가한다. 자동으로 걸려면: make standing-cron APPLY=1"; \
+	   if [ "$(APPLY)" = "1" ]; then \
+	     ( crontab -l 2>/dev/null; echo "$$line" ) | crontab - && echo "등록됨"; \
+	   fi; \
+	 fi
+
 .PHONY: biz-intake
 biz-intake:  ## 홈페이지 문의 접수함 → CRM 흡수 (한 방향)
 	@$(PY) -m dawn_biz.cli intake

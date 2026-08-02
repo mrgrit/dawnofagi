@@ -29,6 +29,10 @@ from .store import BizStore
 B, D, G, R, Y, Z = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[33m", "\033[0m"
 
 
+def _c(text: str, color: str) -> str:
+    return f"{color}{text}{Z}"
+
+
 def _root() -> Path:
     return Paths().root
 
@@ -325,6 +329,55 @@ def cmd_orders(args) -> int:
     return 0
 
 
+def cmd_standing(args) -> int:
+    """상시 작업 (P7 DoD-6).
+
+    **상시 작업도 작업 지시다** — 기록이 똑같이 남는다. 다른 점은 결재가 최초 1회뿐.
+    스케줄러는 바깥(cron·systemd)이고 여기는 **무엇이 지금 차례인가**만 정한다.
+    """
+    from . import standing
+
+    root = _root()
+    s = _store(args)
+
+    if args.register:
+        made = standing.register(root, s)
+        print(f"{B}상시 작업 등록{Z}  {len(made)}건")
+        for sid, wid in made.items():
+            st = s.work_order(wid)["status"]
+            mark = G if st != "pending_approval" else Y
+            print(f"  #{wid:<4} {sid:<14} {_c(st, mark)}")
+        print(f"  {D}결재: 그룹웨어 /orders — 최초 1회만 받는다{Z}")
+        return 0
+
+    if args.tick:
+        ticks = standing.tick(root, s, only=args.only)
+        if not ticks:
+            print(f"{B}상시 작업{Z}  {D}지금 차례인 것이 없다{Z}")
+            return 0
+        print(f"{B}상시 작업 {len(ticks)}건{Z}")
+        for t in ticks:
+            print(t.line())
+        return 0 if all(t.ok for t in ticks) else 1
+
+    items, st = standing.load(root), standing.state(root)
+    ok = standing.approved_orders(root, s)
+    due = {i.id for i in standing.due(root)}
+    print(f"{B}상시 작업{Z}  {len(items)}건")
+    print(f"  {D}id             주기      마지막         결재    상태{Z}")
+    for it in items:
+        last = (st.get(it.id) or {}).get("at", "")
+        gate = "승인" if it.id in ok else _c("미결재", Y)
+        mark = ("차례" if it.id in due else "대기")
+        if last and not (st.get(it.id) or {}).get("ok", True):
+            mark = _c("실패", R)
+        print(f"  {it.id:<14} {it.every:>5}분  "
+              f"{(last[5:16].replace('T', ' ') if last else '없음'):<13} {gate:<8} {mark}")
+    if not ok:
+        print(f"  {D}결재 전에는 돌지 않는다 — dawn-biz standing --register{Z}")
+    return 0
+
+
 def cmd_infra(args) -> int:
     """인프라 풀 (P7 DoD-3).
 
@@ -584,6 +637,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--status", default="")
     x.add_argument("--origin", default="", choices=["", "external", "internal", "standing"])
     x.set_defaults(func=cmd_orders)
+
+    x = s.add_parser("standing", help="상시 작업 — 등록·현황·1회전 (P7 DoD-6)")
+    x.add_argument("--register", action="store_true",
+                   help="상시 작업마다 작업 지시를 만든다 (최초 1회 결재용)")
+    x.add_argument("--tick", action="store_true", help="지금 차례인 것을 돌린다")
+    x.add_argument("--only", default="", help="특정 항목만")
+    x.set_defaults(func=cmd_standing)
 
     x = s.add_parser("infra", help="인프라 풀 — 할당·반납·현황 (P7 DoD-3)")
     x.add_argument("id", nargs="?", type=int, help="작업 지시 id (없으면 풀 현황)")
