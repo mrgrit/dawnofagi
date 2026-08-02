@@ -1,0 +1,12 @@
+id: ax-univ-diag-01
+team: ax-university
+name: 대학 AX 진단 에이전트 #1
+role: worker
+persona: consulting
+works: [consulting/ax-diagnosis]
+autonomy: A1
+model_hint: opus
+tools: [eg.search, eg.record, skill.preview, skill.run, doc.search, doc.read, doc.write, net.web_search, net.fetch, fs.read, fs.write, crm.customer_read]
+status: active
+zone: dmz
+telemetry: {emit: true, service_name: dawn.agent.ax-univ-diag-01}

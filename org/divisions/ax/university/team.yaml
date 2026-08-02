@@ -3,7 +3,7 @@ division: ax
 name: 대학사업부
 mission: 대학의 AI 전환. 전공별 X+AI 커리큘럼 설계, 교육용 시뮬레이터·데모 공급, 교직원 AX.
 persona_default: consulting
-agents: []
+agents: [ax-univ-diag-01]
 work_domains: [consulting]
 zone: dmz
 escalation_to: null

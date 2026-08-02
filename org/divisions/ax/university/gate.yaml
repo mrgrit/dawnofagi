@@ -1,0 +1,44 @@
+# 대학사업부 — 고객(대학) 대면 산출물을 만든다. 공개 학사 정보라 검색은 열되,
+# 나가는 말(발송·계약·금액)과 남는 것(배포·의존성)은 사람 몫이다.
+tools:
+  allow:
+    - eg.*
+    - skill.*
+    - fs.read
+    - fs.write              # 강의안·시뮬레이터 산출물은 파일로 남는다
+    - doc.search
+    - doc.read
+    - doc.write
+    - net.web_search        # 전공별 동향이 근거다 — 막으면 근거를 못 붙인다
+    - net.fetch
+    - crm.customer_read     # 어느 대학 건인지 확인 (읽기만)
+  deny:
+    - comm.*                # 고객에게 나간 자료는 회수가 안 된다
+    - crm.contract_sign
+    - crm.customer_write
+    - fin.*                 # 견적·단가는 말하는 순간 약속이 된다
+    - pay.*
+    - hr.*                  # 고객사 교직원 정보를 우리 인사 도구로 다루지 않는다
+    - sec.*
+    - ctl.*
+    - sys.*                 # 배포는 작업 지시로 올린다
+    - dev.*                 # 시뮬레이터를 만드는 에이전트가 아직 없다 — 생길 때 넓힌다
+    - proj.*                #   (넓히는 것은 의도적인 게이트 수정이어야 한다)
+    - fs.delete
+    - asset.dispose
+autonomy: A1
+hitl:
+  require_on:
+    - destructive
+    - irreversible
+    - external_send
+    - amount_over_threshold
+  amount_threshold_krw: 0        # 금액이 걸리면 무조건 사람 (계약 전 단계다)
+budget:
+  max_steps: 40                  # 커리큘럼 설계는 문헌을 여러 번 뒤진다
+  max_tool_calls: 70
+model:
+  # policy 는 상위(from_eg)를 그대로 둔다 — 자산마다 EG 가 정한다.
+  # 여기서 cloud_ok 로 바꾸면 **넓히는 것**이라 단조 축소에 걸린다(실측).
+  # 우리가 할 수 있는 건 좁히는 것뿐이고, 아래가 그 좁힘이다.
+  force_local_when: [pii, financial]
