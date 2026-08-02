@@ -251,14 +251,23 @@ portal:  ## 사내 그룹웨어 — http://<호스트 IP>:8811 (승인 큐·EG �
 .PHONY: web-bg
 web-bg:  ## 홈페이지 + 그룹웨어 백그라운드 기동 (SSH 끊겨도 산다)
 	@mkdir -p var/web
-	@pgrep -f "[d]awn.web site|[d]awn_groupware.cli site" >/dev/null \
+	@# 살아 있는지는 **포트로** 본다. pgrep -f 는 자기 자신을 매치한다 —
+	@# 이 레시피의 명령줄에 "dawn_groupware.cli site" 가 그대로 들어 있어서
+	@# pgrep 이 그 셸을 보고 "이미 떠 있다"고 판단해 조용히 건너뛰었다.
+	@# 그리고 옛 로그를 cat 해서 성공한 것처럼 보였다.
+	@ss -ltn 2>/dev/null | grep -q ":$${SITE_PORT:-8810} " \
 	  || (setsid nohup $(PY) -m dawn_groupware.cli site --port $${SITE_PORT:-8810} \
 	        --host 0.0.0.0 > var/web/site.log 2>&1 < /dev/null &)
-	@pgrep -f "[d]awn.web portal|[d]awn_groupware.cli portal" >/dev/null \
+	@ss -ltn 2>/dev/null | grep -q ":$${PORTAL_PORT:-8811} " \
 	  || (setsid nohup $(PY) -m dawn_groupware.cli portal --port $${PORTAL_PORT:-8811} \
 	        --host 0.0.0.0 --office-url "$${OFFICE_URL:-http://localhost:8800/}" \
 	        > var/web/portal.log 2>&1 < /dev/null &)
-	@sleep 3; cat var/web/site.log var/web/portal.log
+	@sleep 4
+	@for p in $${SITE_PORT:-8810} $${PORTAL_PORT:-8811}; do \
+	   ss -ltn 2>/dev/null | grep -q ":$$p " \
+	     && echo "  ✔ :$$p 청취 중" || echo "  ✘ :$$p 안 떴다 — var/web/*.log 확인"; \
+	 done
+	@cat var/web/site.log var/web/portal.log
 	@echo "  중지: make web-stop"
 
 .PHONY: web-stop
