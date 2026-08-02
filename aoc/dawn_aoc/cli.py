@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import sys
 from pathlib import Path
@@ -278,7 +279,25 @@ def cmd_replay(args) -> int:
 def cmd_serve(args) -> int:
     import http.server
 
+    from . import webauth
+
     root = _root()
+
+    # **노출되면 인증한다.** 로컬 전용(loopback)이면 붙는 사람이 곧 이 호스트를
+    # 쓰는 사람이라 의미가 없고, `--host 0.0.0.0` 은 정확히 위험한 경우다.
+    # 끌 수는 있지만 명시해야 한다 — 기본값이 안전한 쪽이어야 한다.
+    #
+    # 설정 검사는 **상태 계산보다 먼저** 한다. 뒤에 두면 무거운 일을 다 하고 나서
+    # 설정 때문에 죽어, 실패 이유가 엉뚱한 곳에서 먼저 튀어나온다(실측).
+    local_only = args.host in ("127.0.0.1", "localhost", "::1")
+    need_auth = (not local_only) and not getattr(args, "no_auth", False)
+    if need_auth and not webauth.session_secret(root):
+        print(f"{R}세션 키가 없다{Z} — 그룹웨어를 먼저 기동하라 (make web-bg).", flush=True)
+        print("  콘솔은 그룹웨어 로그인을 인정한다. 키를 여기서 만들면 서로 안 맞는다.",
+              flush=True)
+        print(f"  {D}사내에서만 쓰고 인증을 끄려면: --no-auth{Z}", flush=True)
+        return 2
+
     console_mod.write_state(root)
     app_dir = root / "apps" / "pixel-office"
     state_path = root / "var" / "aoc" / "state.json"
@@ -305,8 +324,40 @@ def cmd_serve(args) -> int:
             self.end_headers()
             self.wfile.write(body)
 
+        def _deny(self, v):
+            """거부도 **응답이다.** 왜 못 보는지와 어디서 로그인하는지 알려준다."""
+            url = webauth.login_url(self.headers.get("Host", ""))
+            if self.path.startswith("/api/"):
+                body = json.dumps({"error": v.why, "login": url},
+                                  ensure_ascii=False).encode()
+                ctype = "application/json; charset=utf-8"
+            else:
+                body = (
+                    "<!doctype html><meta charset=utf-8>"
+                    "<title>로그인이 필요하다</title>"
+                    "<style>body{background:#0e1116;color:#c9d1d9;font:15px/1.7 system-ui;"
+                    "display:grid;place-items:center;height:100vh;margin:0;text-align:center}"
+                    "a{color:#58a6ff}code{color:#8b949e}</style>"
+                    "<div><h2>관제 콘솔</h2>"
+                    f"<p>{html.escape(v.why)}</p>"
+                    f'<p><a href="{html.escape(url)}">그룹웨어에서 로그인</a></p>'
+                    "<p><code>같은 호스트 이름으로 로그인해야 세션이 공유된다</code></p>"
+                    "</div>").encode()
+                ctype = "text/html; charset=utf-8"
+            self.send_response(401)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             try:
+                if need_auth:
+                    v = webauth.check(root, self.headers.get("Cookie", ""))
+                    if not v.ok:
+                        self._deny(v)
+                        return
                 self._route()
             except Exception as exc:                   # 콘솔은 죽지 않는다
                 self._fail(exc)
@@ -349,8 +400,13 @@ def cmd_serve(args) -> int:
         else:
             for ip in _lan_ips():
                 print(f"  {B}http://{ip}:{args.port}/{Z}   ← 브라우저에서 여기로", flush=True)
-            print(f"  {Y}⚠ 인증 없이 열려 있다.{Z} 이 콘솔은 전 에이전트의 텔레메트리·"
-                  f"케이스·자산 이름을 그대로 보여준다.", flush=True)
+            if need_auth:
+                print(f"  {G}🔒 그룹웨어 로그인 필요{Z} "
+                      f"({webauth.CAPABILITY} 능력) — 같은 호스트 이름으로 로그인하라",
+                      flush=True)
+            else:
+                print(f"  {Y}⚠ 인증 없이 열려 있다 (--no-auth).{Z} 이 콘솔은 전 에이전트의 "
+                      f"텔레메트리·케이스·자산 이름을 그대로 보여준다.", flush=True)
             print(f"    {D}el34 브리지(10.20.x)에도 함께 노출된다 — "
                   f"ext 존에 attacker 컨테이너가 있다는 걸 잊지 마라.{Z}", flush=True)
         print("  상태 API   /api/state   ·  트레이스 /api/trace/<id>", flush=True)
@@ -455,10 +511,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.set_defaults(func=cmd_state)
 
     x = s.add_parser("serve", help="픽셀 오피스 + 상태 API")
+    x.add_argument("--no-auth", action="store_true",
+                   help="인증 없이 연다 (기본은 외부 바인딩 시 그룹웨어 로그인 요구)")
     x.add_argument("--port", type=int, default=8800)
     x.add_argument("--host", default="127.0.0.1",
                    help="기본은 로컬 전용. 다른 PC 에서 보려면 --host 0.0.0.0 "
-                        "(인증이 없으니 신뢰하는 망에서만)")
+                        "(그때는 그룹웨어 로그인을 요구한다)")
     x.set_defaults(func=cmd_serve)
     return p
 

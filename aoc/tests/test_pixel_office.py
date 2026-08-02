@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -533,3 +534,142 @@ def test_state_failure_answers_with_the_reason(root):
         assert "스키마(business) 위반" in json.loads(e.value.read())["error"]
     finally:
         console_mod.write_state = real
+
+
+# ── 인증 (TODO T2) ───────────────────────────────────────────────────────
+#
+# 콘솔은 전 에이전트의 텔레메트리·케이스·자산 이름을 그대로 보여준다. 실측으로
+# 인증 없이 공개돼 `/api/state` 가 2.4MB 를 그냥 준 적이 있다. 로그인을 새로
+# 만들지 않고 **그룹웨어 세션을 검증한다** — 쿠키는 포트를 구분하지 않는다.
+
+
+def _cookie(root, username: str) -> str:
+    """그룹웨어가 만드는 것과 **같은 모양**의 세션 쿠키."""
+    import base64
+    import json as _json
+
+    from dawn_aoc import webauth
+    from itsdangerous import TimestampSigner
+
+    data = base64.b64encode(_json.dumps({"u": username}).encode())
+    return TimestampSigner(webauth.session_secret(root)).sign(data).decode()
+
+
+@pytest.fixture
+def exposed(root):
+    """외부 바인딩(0.0.0.0) — **인증이 켜지는 경우**."""
+    from dawn_aoc import webauth
+
+    if not webauth.session_secret(root):
+        pytest.skip("세션 키 없음 — 그룹웨어를 먼저 기동해야 한다")
+    port = 8898
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "dawn_aoc.cli", "serve", "--port", str(port),
+         "--host", "0.0.0.0"],
+        cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(60):
+        try:
+            urllib.request.urlopen(base + "/", timeout=2).read()
+            break
+        except urllib.error.HTTPError:
+            break                                   # 401 도 "떴다"는 뜻이다
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            time.sleep(0.25)
+    else:
+        proc.terminate()
+        pytest.fail("서버가 뜨지 않았다")
+    yield base
+    proc.terminate()
+    proc.wait(timeout=10)
+
+
+def _get(url, cookie=""):
+    req = urllib.request.Request(url)
+    if cookie:
+        req.add_header("Cookie", f"dawn_portal={cookie}")
+    return urllib.request.urlopen(req, timeout=20)
+
+
+def test_exposed_console_refuses_anonymous(exposed):
+    """외부에 바인딩하면 인증이 켜진다 — 텔레메트리를 그냥 주지 않는다."""
+    for path in ("/", "/api/state"):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _get(exposed + path)
+        assert e.value.code == 401, path
+    # /api/* 는 JSON 으로 답한다 — 화면이 이유를 띄울 수 있게
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(exposed + "/api/state")
+    body = json.loads(e.value.read())
+    assert body["error"] and body["login"].endswith("/login")
+
+
+def test_groupware_session_is_accepted(exposed, root):
+    """로그인을 새로 만들지 않는다 — 계정을 두 벌 두면 권한이 갈라진다."""
+    from dawn_core.identity import UserStore
+
+    who = next((u.username for u in UserStore(root).list() if u.can("aoc.view")),
+               None)
+    if who is None:
+        pytest.skip("aoc.view 능력을 가진 계정이 없다")
+    assert _get(exposed + "/", _cookie(root, who)).status == 200
+    st = json.loads(_get(exposed + "/api/state", _cookie(root, who)).read())
+    assert st["agents"]
+
+
+def test_login_without_the_capability_is_not_enough(exposed, root):
+    """로그인했다고 다 보는 게 아니다 — `aoc.view` 가 있어야 한다."""
+    from dawn_core.identity import UserStore
+
+    who = next((u.username for u in UserStore(root).list()
+                if not u.can("aoc.view")), None)
+    if who is None:
+        pytest.skip("aoc.view 없는 계정이 없다")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(exposed + "/", _cookie(root, who))
+    assert e.value.code == 401
+    assert "aoc.view" in e.value.read().decode()
+
+
+@pytest.mark.parametrize("cookie", [
+    "eyJ1IjoiYWRtaW4ifQ==.AAAAAA.BBBBBB",       # 서명 위조
+    "garbage",
+    "",
+])
+def test_forged_cookies_are_refused(exposed, cookie):
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(exposed + "/", cookie)
+    assert e.value.code == 401
+
+
+def test_a_signature_from_another_key_is_refused(exposed, root):
+    """다른 키로 서명한 쿠키 — 세션 키를 모르면 못 만든다."""
+    import base64
+
+    from itsdangerous import TimestampSigner
+
+    forged = TimestampSigner("x" * 64).sign(
+        base64.b64encode(b'{"u": "admin"}')).decode()
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(exposed + "/", forged)
+    assert e.value.code == 401
+
+
+def test_local_only_stays_open_for_development(server):
+    """로컬 전용이면 붙는 사람이 곧 이 호스트를 쓰는 사람이라 인증이 의미 없다.
+    개발 흐름을 막지 않는다 — 위험한 것은 외부 바인딩이다."""
+    assert urllib.request.urlopen(server + "/", timeout=5).status == 200
+
+
+def test_it_fails_closed_without_a_session_key(root, tmp_path):
+    """검증기가 없으면 **거부**지 통과가 아니다. '키가 없으니 그냥 열자'가 가장 나쁘다."""
+    # 키 파일이 없는 빈 루트에서 띄운다 — 환경변수도 비운다.
+    (tmp_path / "COMPANY.md").write_text("#\n", encoding="utf-8")
+    env = {**os.environ, "DAWN_ROOT": str(tmp_path)}
+    env.pop("DAWN_PORTAL_SECRET", None)
+    p = subprocess.run(
+        [sys.executable, "-m", "dawn_aoc.cli", "serve", "--port", "8897",
+         "--host", "0.0.0.0"],
+        cwd=root, env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode != 0, "세션 키가 없는데 열렸다"
+    assert "세션 키가 없다" in p.stdout
