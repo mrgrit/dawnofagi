@@ -215,6 +215,18 @@ office-bg:  ## 픽셀 오피스 백그라운드 기동 — SSH 를 끊어도 살
 	@cat var/aoc/serve.log
 	@echo "  로그: var/aoc/serve.log   ·  중지: make office-stop"
 
+.PHONY: tunnel
+tunnel:  ## 외부 접속 URL (Cloudflare Tunnel) — 기본은 공개 홈페이지. TARGET=portal|office
+	@bash infra/cloudflare/tunnel.sh $${TARGET:+--target $(TARGET)}
+
+.PHONY: tunnel-status
+tunnel-status:  ## 열려 있는 외부 URL
+	@bash infra/cloudflare/tunnel.sh --status
+
+.PHONY: tunnel-down
+tunnel-down:  ## 외부 URL 전부 닫기
+	@bash infra/cloudflare/tunnel.sh --down
+
 .PHONY: office-preview
 office-preview:  ## 픽셀 오피스 화면을 PNG 로 (브라우저 없는 서버용 · quickjs·pillow 필요)
 	@$(PY) scripts/office-preview.py --out $${OUT:-var/aoc/preview} \

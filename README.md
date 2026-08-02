@@ -180,7 +180,7 @@ biz/                          업무 시스템 — 문서·CRM·프로젝트·�
   dawn_biz/                     업무 DB · EG 자산 대조 · 업무 스킬 · 업무 에이전트
 ops/                          통합·레드팀·리허설·운영                     (P6)
   dawn_ops/                     E2E · 오펜시브 레드팀 · 인시던트 리허설 · 멀티테넌트
-infra/                        배포 · el34 연동
+infra/                        배포 · el34 연동 · GPU VPN · Cloudflare Tunnel
 docs/
   START_HERE.md                 구축 순서 P0→P6
   context/                      참조 문서 (헌장·AOC 아키텍처·조직·스택·컨벤션)
@@ -285,6 +285,24 @@ make tenant                             # 멀티테넌트 점검 + 고객 온보
 | 공개 홈페이지 | `http://<호스트>:8810` | dmz 앞단 (L0) | 없음 |
 | 사내 그룹웨어 | `http://<호스트>:8811` | user/int | 필요 |
 | 픽셀 오피스 | `http://<호스트>:8800` | 사내 | 없음 (그룹웨어에서 링크) |
+
+### 외부에서 접속 — Cloudflare Tunnel
+
+사설망 호스트를 포트포워딩 없이 연다. **밖으로 나가는 연결**이라 인바운드 방화벽
+구멍이 없다.
+
+```bash
+make tunnel                  # 공개 홈페이지(:8810) → https://<임의>.trycloudflare.com
+make tunnel TARGET=portal    # 그룹웨어 (로그인 있음)
+make tunnel TARGET=office    # 픽셀 오피스 — ⚠ 인증 없음. 'open' 을 입력해야 열린다
+make tunnel-status / tunnel-down
+```
+
+**터널은 경로일 뿐 접근 통제가 아니다.** 픽셀 오피스는 인증이 없어서 URL 을 아는
+사람은 누구나 전 에이전트의 텔레메트리·케이스·자산 이름을 본다. 고정 URL 로 상시
+열 거라면 **Cloudflare Access(Zero Trust)** 를 앞에 붙여라.
+
+자세히: [`infra/cloudflare/README.md`](infra/cloudflare/README.md)
 
 ---
 

@@ -49,6 +49,28 @@ make vpn-status
 
 ---
 
+### 외부에서 접속해야 할 때
+
+```bash
+make tunnel              # 공개 홈페이지만 — 기본값이 이것인 이유가 있다
+make tunnel-status       # 지금 열려 있는 것
+make tunnel-down         # 닫는다
+```
+
+**사람이 실행한다.** 에이전트는 외부 노출을 만들지 않는다 — 공개 범위 변경은
+`comm.external_send`·`sec.firewall_change` 와 같은 급이다.
+
+| 열 것 | 인증 | 판단 |
+|---|---|---|
+| 공개 홈페이지 :8810 | 없음 | **열어도 된다.** 원래 외부인이 보는 화면이다 |
+| 사내 그룹웨어 :8811 | 로그인 | 열면 무차별 대입 표적. `DAWN_PORTAL_HTTPS=1` 로 재기동 |
+| 픽셀 오피스 :8800 | **없음** | URL 을 아는 누구나 전 에이전트 텔레메트리를 본다. 상시 노출은 Access 를 앞에 붙인 뒤에 |
+
+퀵 터널은 프로세스가 죽으면 URL 이 사라진다. 상시 운영은 네임드 터널 +
+Cloudflare Access — [`infra/cloudflare/README.md`](../../infra/cloudflare/README.md).
+
+---
+
 ## 2. 일상 — 에이전트에게 일 시키기
 
 에이전트는 **이벤트로 기동한다.** 상시 폴링이 아니다.

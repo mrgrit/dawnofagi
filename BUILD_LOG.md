@@ -2119,3 +2119,43 @@ judge[model:judge → qwen3.6:35b]  fail  근거=30 완결=90 궤적=80
 KPI 표본 읽는 법 · 파일 삭제 주의) · `QUESTIONS.md` Q8.
 
 검증: `pytest` **304개 통과** · `make check` 전부 통과 · `scripts/verify-p3.sh` 11 PASS / 0 FAIL.
+
+### 외부 접속 URL — Cloudflare Tunnel
+
+이 호스트는 사설망(192.168.0.108)에 있다. 포트포워딩·공유기 설정 없이 외부에서 닿게
+하려고 Cloudflare Tunnel 을 붙였다. **밖으로 나가는 연결**이라 인바운드 방화벽 구멍이
+생기지 않는다 — 그게 이 방식을 고른 이유다.
+
+```bash
+make tunnel                  # 공개 홈페이지(:8810)  ← 기본
+make tunnel TARGET=portal    # 사내 그룹웨어(:8811)
+make tunnel TARGET=office    # 픽셀 오피스(:8800)  ⚠ 'open' 입력 필요
+make tunnel-status / tunnel-down
+```
+
+**기본을 홈페이지로 둔 이유**: 세 서비스 중 유일하게 공개용으로 설계된 것이다
+(`zone:ext` · `asset:site` · sec:L0). 나머지 둘은 성격이 다르다.
+
+| 서비스 | 인증 | 외부 노출 판단 |
+|---|---|---|
+| 공개 홈페이지 :8810 | 없음 | 원래 외부인이 보는 화면 |
+| 사내 그룹웨어 :8811 | 로그인 | 무차별 대입 표적이 된다. `DAWN_PORTAL_HTTPS=1` 필요 |
+| 픽셀 오피스 :8800 | **없음** | 전 에이전트 텔레메트리·케이스 제목·자산 이름·조직 구조가 그대로 보인다 |
+
+픽셀 오피스만 `'open'` 을 타이핑해야 열리게 했다. **터널은 경로일 뿐 접근 통제가
+아니다** — Cloudflare 퀵 터널은 아무것도 막지 않는다. 인증 없는 화면을 인터넷에 여는
+건 되돌리기 어려운 노출이라 사람이 한 번 더 확인하게 두는 게 맞다.
+
+스크립트도 사람이 실행한다 (`infra/gpu/vpn-connect.sh` 와 같은 원칙) — 공개 범위 변경은
+`comm.external_send`·`sec.firewall_change` 와 같은 급이다.
+
+검증: `https://<임의>.trycloudflare.com` 외부에서 **HTTP 200**, 홈페이지 본문 정상.
+
+**퀵 터널의 성질**: 계정 불필요 · URL 임의 배정 · 프로세스가 죽으면 사라짐.
+고정 URL 은 네임드 터널 + 자기 도메인이 필요하고, `cloudflared tunnel login` 이
+브라우저를 열어야 해서 **사람이 직접** 해야 한다. 그룹웨어·픽셀 오피스를 상시로 열
+거라면 **Cloudflare Access(Zero Trust)** 를 앞단에 붙이는 게 맞다 —
+`infra/cloudflare/README.md` 에 절차를 적었다.
+
+새 외부 의존: `cloudflared` 2026.7.3 (Apache-2.0, Cloudflare). 배포 필수 의존은
+아니다 — 터널을 안 쓰면 설치할 필요가 없고, 스크립트가 없으면 안내하고 멈춘다.
