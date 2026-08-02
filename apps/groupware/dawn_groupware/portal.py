@@ -863,7 +863,7 @@ async def orders(request: Request) -> Response:
             + Safe('</b>')
             + Safe(" ") + span(r["status"], class_="tag")
             + (Safe(" ") + span("내 결재", class_="tag acc") if mine else Safe("")),
-            small(f'{r["origin"]} · {r["business"]} · {r["division"]} · '
+            small(f'{r["origin"]} · {r["business"] or "내부 지원"} · {r["division"]} · '
                   f'환경 {r["infra_tier"]} · {r["requester"] or "—"}', class_="dim"),
             small("결재: " + (" → ".join(f'{c["role"]}({c["portal_user"]})' for c in chain)
                              or "라인 없음"), class_="dim"),
@@ -881,11 +881,17 @@ async def orders(request: Request) -> Response:
 def _order_form(request: Request) -> Safe:
     from dawn_core import workintake
 
-    cs = workintake.choices(_root(request), include_planned=True)
-    opts = [Safe('<option value="">— 사업 선택 —</option>')]
+    root = _root(request)
+    cs = workintake.choices(root, include_planned=True)
+    # 사업 없이도 접수된다 — 경리·문의 응대·시스템 운영은 수익 사업이 아니지만
+    # 누군가는 해야 하는 일이다. 사업을 필수로 두면 경영관리부는 지시를 못 만든다.
+    opts = [Safe('<option value="">— 사업 없음 (내부 지원 업무) —</option>')]
     for c in cs:
         opts.append(Safe(f'<option value="{h(c.id)}">') + Safe(h(c.name))
                     + Safe(f' — 환경 {h(", ".join(c.tiers))}</option>'))
+    divs = [Safe('<option value="">— 사업을 골랐으면 비워 둔다 —</option>')]
+    divs += [Safe(f'<option value="{h(did)}">') + Safe(h(name)) + Safe("</option>")
+             for did, name in workintake.division_choices(root)]
     tiers = [Safe(f'<option value="{t}">') + Safe(h(lbl)) + Safe("</option>")
              for t, (lbl, _d) in workintake.TIER_LABEL.items()]
     return Safe('<details class="card"><summary>새 작업 지시</summary>'
@@ -895,8 +901,11 @@ def _order_form(request: Request) -> Safe:
         Safe('<div><label for="o-t">제목</label>')
         + input_(type="text", id="o-t", name="title", required=True, maxlength="200")
         + Safe("</div>"),
-        Safe('<div><label for="o-biz">사업</label><select id="o-biz" name="business" required>')
+        Safe('<div><label for="o-biz">사업</label><select id="o-biz" name="business">')
         + join(opts) + Safe("</select></div>"),
+        Safe('<div><label for="o-div">담당 본부</label>'
+             '<select id="o-div" name="division">') + join(divs)
+        + Safe("</select></div>"),
         Safe('<div><label for="o-tier">필요한 환경</label>')
         + Safe('<select id="o-tier" name="infra_tier" required>') + join(tiers)
         + Safe("</select></div>"),
@@ -923,7 +932,9 @@ async def orders_post(request: Request) -> Response:
     tier = str(form.get("infra_tier", "none"))
     body_text = str(form.get("body", ""))[:8000]
     try:
-        division, tier = workintake.validate(root, business=business, infra_tier=tier)
+        division, tier = workintake.validate(
+            root, business=business, infra_tier=tier,
+            division=str(form.get("division", "")))
         if not title:
             raise ValueError("제목이 비었다")
     except ValueError as e:
@@ -995,7 +1006,8 @@ async def order_detail(request: Request) -> Response:
     body = join([
         h1(f'#{r["id"]} {r["title"]}'),
         div(join([
-            small(f'상태 {r["status"]} · {r["origin"]} · {r["business"]} · '
+            small(f'상태 {r["status"]} · {r["origin"]} · '
+                  f'{r["business"] or "내부 지원 (사업 없음)"} · '
                   f'{r["division"]} · 환경 {r["infra_tier"]}', class_="dim"),
             small(f'요청자 {r["requester"] or "—"} ({r["requester_org"] or "—"}) · '
                   f'{r["created_at"][:16].replace("T", " ")}', class_="dim"),

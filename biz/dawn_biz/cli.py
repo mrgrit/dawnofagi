@@ -319,8 +319,9 @@ def cmd_orders(args) -> int:
         return 0
     print(f"  {D}id   상태               출처        사업              환경        제목{Z}")
     for r in rows:
+        biz = r["business"] or f"내부:{r['division']}"     # 사업 없는 내부 지원 업무
         print(f"  {r['id']:<4} {r['status']:<18} {r['origin']:<10} "
-              f"{r['business']:<17} {r['infra_tier']:<10} {r['title'][:40]}")
+              f"{biz:<17} {r['infra_tier']:<10} {r['title'][:40]}")
     return 0
 
 

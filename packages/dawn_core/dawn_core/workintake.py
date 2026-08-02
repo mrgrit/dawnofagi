@@ -82,16 +82,51 @@ def choices(root: Path, *, include_planned: bool = False) -> list[BusinessChoice
     return out
 
 
+def division_choices(root: Path) -> list[tuple[str, str]]:
+    """사업 없이 접수할 때 고를 본부 목록 — `[(id, 이름)]`.
+
+    사업은 **수익 단위**, 본부는 **일하는 단위**다. 내부 지원 업무는 수익 단위가
+    없으니 일하는 단위를 직접 고른다 (QUESTIONS Q12).
+    """
+    from . import Registry
+
+    return [(did, d.data.get("name", did))
+            for did, d in sorted(Registry.load(root).divisions.items())]
+
+
 def validate(root: Path, *, business: str, infra_tier: str,
              division: str = "") -> tuple[str, str]:
     """(담당 본부, 인프라 등급) 을 확정한다. 규칙을 어기면 예외.
+
+    **사업이 비어 있으면 내부 지원 업무다.** 경리 처리·문의 응대·시스템 운영은
+    돈을 버는 사업이 아니라 회사가 굴러가려고 하는 일이다. 사업은 **수익 단위**이고
+    본부는 **일하는 단위**라 원래 1:1 이 아닌데, 사업을 필수로 두면 경영관리부처럼
+    어느 사업의 소관도 아닌 본부는 작업 지시를 아예 못 만든다 (QUESTIONS Q12).
 
     Returns:
         (division, infra_tier)
 
     Raises:
         ValueError: 없는 사업 · 그 사업이 허용하지 않은 등급 · 그 사업 소관이 아닌 본부
+            · 내부 업무인데 본부를 안 골랐거나 없는 본부
     """
+    from . import Registry
+
+    if not business:
+        if infra_tier not in INFRA_TIERS:
+            raise ValueError(f"알 수 없는 인프라 등급: {infra_tier}")
+        if infra_tier in TIER_NEEDS_CEO:
+            # 사업 없는 내부 업무가 외부 시스템 자원을 점유할 이유가 없다.
+            # 필요하면 사업을 붙여서 올려라 — 그래야 비용이 어디로 가는지 남는다.
+            raise ValueError(
+                f"내부 지원 업무는 '{infra_tier}' 등급을 쓸 수 없다 "
+                "(사업을 지정하라 — 외부 자원 점유는 비용 귀속처가 있어야 한다)")
+        if not division:
+            raise ValueError("내부 지원 업무는 담당 본부를 골라야 한다")
+        if division not in Registry.load(root).divisions:
+            raise ValueError(f"없는 본부: {division}")
+        return division, infra_tier
+
     by_id = {c.id: c for c in choices(root, include_planned=True)}
     c = by_id.get(business)
     if c is None:
@@ -138,7 +173,7 @@ def approval_chain(root: Path, *, business: str, infra_tier: str,
     reasons = []
     if infra_tier in TIER_NEEDS_CEO:
         reasons.append(f"{infra_tier} 자원 점유")
-    biz = reg.businesses.get(business)
+    biz = reg.businesses.get(business) if business else None
     if biz and biz.data.get("data_sensitivity") == "L3":
         reasons.append("L3 데이터")
     if origin == "external":

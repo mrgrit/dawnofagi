@@ -859,3 +859,51 @@ def test_rejection_stops_the_chain(portal, users, order):
     c, _ = _login(portal, "ceo") if users.get("ceo") else (None, None)
     if c is not None:
         assert _order_csrf(c, order) is None, "반려됐는데 다음 결재자에게 폼이 보인다"
+
+
+def test_internal_order_needs_no_business(portal, users, root):
+    """사업 없이도 접수된다 — 경리·문의 응대·시스템 운영은 수익 사업이 아니지만
+    누군가는 해야 하는 일이다. 사업을 필수로 두면 경영관리부처럼 어느 사업의
+    소관도 아닌 본부는 작업 지시를 아예 못 만든다 (QUESTIONS Q12)."""
+    from dawn_biz.store import BizStore
+
+    c, _ = _login(portal, "admin")
+    r = c.get("/orders")
+    assert "내부 지원 업무" in r.text, "사업 없이 접수하는 길이 폼에 없다"
+    tok = re.search(r'name="_csrf" value="([^"]+)"', r.text).group(1)
+
+    c.post("/orders", data={"title": "[테스트] 내부 경리 처리", "business": "",
+                            "division": "corp", "infra_tier": "none",
+                            "body": "본문", "_csrf": tok})
+    s = BizStore(root)
+    row = next((w for w in s.work_orders()
+                if w["title"] == "[테스트] 내부 경리 처리"), None)
+    try:
+        assert row is not None, "내부 업무가 접수되지 않았다"
+        assert row["business"] == "" and row["division"] == "corp"
+        assert row["status"] == "pending_approval"
+    finally:
+        if row:
+            s.db.execute("DELETE FROM work_order WHERE id=?", (row["id"],))
+            s.db.commit()
+
+
+def test_internal_order_cannot_take_external_infrastructure(portal, users):
+    """사업 없는 내부 업무가 외부 시스템 자원(vm/server)을 점유할 수 없다 —
+    비용 귀속처가 없기 때문이다. 필요하면 사업을 붙여서 올린다."""
+    c, _ = _login(portal, "admin")
+    tok = re.search(r'name="_csrf" value="([^"]+)"', c.get("/orders").text).group(1)
+    r = c.post("/orders", data={"title": "[테스트] 서버 달라", "business": "",
+                                "division": "corp", "infra_tier": "vm",
+                                "body": "", "_csrf": tok})
+    assert "비용 귀속처" in r.text, "등급 제한이 화면에 안 보인다"
+
+
+def test_internal_order_must_name_a_division(portal, users):
+    """사업도 본부도 없으면 결재 라인을 못 만든다 — 받아 두면 갈 곳 없는 지시가 쌓인다."""
+    c, _ = _login(portal, "admin")
+    tok = re.search(r'name="_csrf" value="([^"]+)"', c.get("/orders").text).group(1)
+    r = c.post("/orders", data={"title": "[테스트] 본부 없음", "business": "",
+                                "division": "", "infra_tier": "none",
+                                "body": "", "_csrf": tok})
+    assert "담당 본부를 골라야" in r.text
