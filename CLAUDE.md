@@ -8,6 +8,7 @@
 2. [`docs/START_HERE.md`](docs/START_HERE.md) — 구축 순서(P0→P6).
 3. 지금 하는 단계의 지시문 `docs/instructions/Pn_*.md` 와 그 문서가 지정한 `docs/context/` 참조 문서.
 4. [`BUILD_LOG.md`](BUILD_LOG.md) 최하단 — 어디까지 왔는지.
+5. [`TODO.md`](TODO.md) — 남은 일. **누가** 할 수 있는지가 항목마다 적혀 있다.
 
 ## 절대 규칙 (05_conventions.md 요약 — 예외 없음)
 
@@ -35,6 +36,8 @@
 
 ```
 COMPANY.md            L1 통제 — 전사 에이전트 헌법 (읽어라)
+TODO.md               남은 일 — 누가 할 수 있는지까지
+QUESTIONS.md          사람의 결정이 필요한 질문
 org/                  조직·사업·에이전트 레지스트리 (YAML 매니페스트 = 권위)
   businesses/           사업 단위 — 새 사업은 여기 YAML 추가만으로 편입
   divisions/            본부/팀 + AGENT_TEAM.md(L2) + gate.yaml
@@ -74,3 +77,6 @@ make redteam        # 오펜시브 레드팀 + 탐지 커버리지
 ## 진행 상황
 
 현재 단계는 `BUILD_LOG.md` 최하단을 보라. 앞 단계의 DoD를 충족하지 못했으면 다음으로 넘어가지 마라.
+
+P0~P7 은 완료됐다. 남은 일은 [`TODO.md`](TODO.md) — **사람만 할 수 있는 것과 에이전트가
+할 수 있는 것이 갈라져 있다.** 막힌 항목을 붙잡고 있지 말고 그 구분을 먼저 보라.
