@@ -300,7 +300,7 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
             {**z, "visits": visits.get((did, z["short"]), 0),
              "used": z["short"] in used,
              "teams": [t["team_id"] for t in d["teams"] if t["zone"] == z["short"]],
-             **_sector_work(did, z["short"], mine, occ, catalog)}
+             **_sector_work(did, z, mine, occ, catalog)}
             for z in zones if not z["is_gate"]
         ]
         sectors.sort(key=lambda z: (_sec_rank(z), z["short"]))
@@ -322,7 +322,7 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
     }
 
 
-def _sector_work(did: str, short: str, mine: list[dict[str, Any]],
+def _sector_work(did: str, zone: dict[str, Any], mine: list[dict[str, Any]],
                  occ: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[str, Any]:
     """이 방에서 **실제로 무슨 업무가 돌았나**.
 
@@ -332,6 +332,7 @@ def _sector_work(did: str, short: str, mine: list[dict[str, Any]],
     * `works` — 선언. 여기 들어온 에이전트가 맡은 L3 업무 SOP 다. 어느 호출이
       어느 SOP 였는지는 스팬에 없으므로 **에이전트 단위로만** 붙인다.
     """
+    short = zone["short"]
     by_id = {a["agent_id"]: a for a in mine}
     segs = [s for s in occ if s["zone"] == short and s["agent_id"] in by_id]
     # **방에 들어온 것과 자기 자리에 앉아 있던 것은 다르다.** desk 구간은 자산을
@@ -365,8 +366,24 @@ def _sector_work(did: str, short: str, mine: list[dict[str, Any]],
             "calls": sum(1 for s in entered if s["agent_id"] == aid),
             "works": a["authority"].get("works", []),
         })
+    # 집기 하나(=자산 하나)마다 "누가 어떤 도구로 몇 번 만졌고 게이트가 뭐라 했나".
+    # 방 안에 들어갔다는 사실만으로는 무엇에 접근했는지 알 수 없다.
+    assets = []
+    for as_ in zone["assets"]:
+        touched = [s for s in entered if s["asset"] == as_["id"]]
+        assets.append({
+            **as_,
+            "calls": len(touched),
+            "tools": _tools(touched),
+            "agents": sorted({s["agent_id"] for s in touched}),
+            "gate": {k: sum(1 for s in touched if s["gate"] == k)
+                     for k in sorted({s["gate"] for s in touched if s["gate"]})},
+            "max_severity": max((s["severity"] for s in touched), default=0),
+        })
+
     homed = [a for a in mine if a.get("zone") == short]
     return {
+        "assets": assets,                  # EG 자산 + 실제 접촉 기록
         "tools": _tools(entered),          # 방 안에서 부른 도구
         "desk_tools": _tools(at_desk),     # 이 존을 홈으로 두고 자기 자리에서 부른 도구
         "visitors": visitors,

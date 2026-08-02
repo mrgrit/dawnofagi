@@ -273,7 +273,8 @@ def test_only_encoding_tables_are_hardcoded(html):
     consts = set(re.findall(r"const\s+([A-Z][A-Z0-9_]*)\s*=", body))
     assert consts <= {"G", "ZONE_TINT", "SEV_COLOR", "EFFECT", "HAT", "MODEL_C",
                       "IRR_C", "GATE_C", "KIND_FURN", "HAIR", "SKIN", "ACCENT",
-                      "SPEEDS", "SPEED_NAME", "S"}, f"인코딩 표가 아닌 상수: {sorted(consts)}"
+                      "KIND_LABEL", "SPEEDS", "SPEED_NAME", "S"}, \
+        f"인코딩 표가 아닌 상수: {sorted(consts)}"
     # S 는 런타임 홀더다 — **비어서 시작해야** 한다. 초기값에 데이터가 있으면 픽스처다.
     m = re.search(r"const\s+S\s*=\s*\{(.*?)\};", body, re.S)
     assert m and "state:null" in m.group(1).replace(" ", ""), \
@@ -373,6 +374,14 @@ def test_floor_view_draws_only_that_floor(headless, state):
     assert len(set(lv["desk"])) == 1, "데스크 뷰도 그 층만 배경으로 써야 한다"
     assert headless["views"]["floor"] < headless["views"]["building"], \
         "층 하나가 사옥 전체보다 무겁다면 다른 층까지 그리고 있는 것이다"
+
+
+def test_room_view_shows_one_room_only(headless):
+    """방/부서 안으로 들어가면 층 평면은 사라지고 그 방만 남아야 한다."""
+    lv, views = headless["levels"], headless["views"]
+    for v in ("room", "roomTeam"):
+        assert lv[v] == [], f"{v} 뷰가 층 평면({lv[v]})을 아직 그린다"
+        assert views[v] > 60, f"{v} 뷰가 사실상 비었다 ({views[v]} 콜)"
 
 
 def test_floor_panel_shows_work_and_authority(headless):

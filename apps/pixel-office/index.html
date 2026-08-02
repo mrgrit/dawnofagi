@@ -169,7 +169,7 @@
 /* 격자·층 치수. STEP 은 층 하나의 아이소 높이((Δx+Δy)·TH/2)보다 커야 한다 —
    작으면 위층이 아래층 뒷부분을 덮어 방이 사라진다. */
 const G = { TW:44, TH:8, SW:4.8, SD:5, COR:1.8, GAP:1.1, TEAM:3, TEAMD:3.4, TROW:4,
-            LOUNGE:6.5, CORE:2.4, STEP:200, WALL:34, SPEED:26, THF:20 };
+            LOUNGE:6.5, CORE:2.4, STEP:200, WALL:34, SPEED:26, THF:20, RW:19, RD:13 };
 /* 빌딩 뷰는 층을 쌓아야 하니 납작하게 본다(TH). 한 층만 볼 땐 쌓을 게 없으니
    카메라를 세워 방이 크게 보이게 한다(THF). 격자 좌표는 그대로다. */
 const thNow = () => S.view === "building" ? G.TH : G.THF;
@@ -203,7 +203,7 @@ const SPEED_NAME = ["느리게", "보통", "빠르게", "아주 빠르게"];
 /* ── 런타임 홀더 — 비어서 시작한다 ────────────────────────────────────── */
 
 const S = { state:null, view:"building", div:null, agent:null, plan:null, pos:{},
-            sel:{kind:"", id:""},
+            sel:{kind:"", id:""}, room:{kind:"", id:""},
             clock:0, playing:false, speed:1, ev:[], ei:0, spans:[], hit:[], hover:null, tip:null,
             cam:{x:0,y:0,z:1}, drag:null, raf:0, last:0, moving:false };
 
@@ -670,8 +670,9 @@ function drawSectors(lv, alpha){
 
     if(i < lv.sectors.length-1) drawGate(lv, sc);
     S.hit.push({ poly:pts, go:()=>{
-        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); }
-        S.sel = { kind:"sector", id:z.short }; draw(); },
+        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level);
+                                   S.sel = { kind:"sector", id:z.short }; draw(); return; }
+        enterRoom("sector", z.short); },
       tip:()=>"<b>" + esc(z.pixel_room) + "</b> " + esc(z.short) + "<br>" +
               esc(z.sensitivity) + " · " + esc(z.security_level) + " · " + esc(z.cidr) +
               "<br><i>자산 " + z.assets.length + " · 이 층에서 진입 " + z.visits + "회</i>" });
@@ -698,8 +699,9 @@ function drawTeams(lv){
     }
     S.hit.push({ poly:slab(is.x-0.2, is.y, is.w+0.4, is.d-0.4, lv.level, 0.45, null, null),
       go:()=>{
-        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); }
-        S.sel = { kind:"team", id:t.team_id }; draw(); },
+        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level);
+                                   S.sel = { kind:"team", id:t.team_id }; draw(); return; }
+        enterRoom("team", t.team_id); },
       tip:()=>"<b>" + esc(t.name) + "</b> " + esc(t.team_id) + "<br>" +
               esc(t.eg_org) + " · zone:" + esc(t.zone) +
               "<br><i>에이전트 " + t.agents.length + " · run " + t.runs +
@@ -875,7 +877,221 @@ function floorHud(lv, w){
     label("차단 " + wk.blocked.join(" "), {x:bx+bw-12, y:by+16}, GATE_C.block, 11, "right");
 }
 
-/* ── 뷰 3: 데스크 (에이전트 1명 — 실행 트레이스) ──────────────────────── */
+/* ── 뷰 3: 룸 (방 하나 / 부서 자리 하나 — 안에서 무엇에 접근하는지) ─────
+   빌딩·층 뷰는 "어디 있나"를 보여준다. 룸 뷰는 "무엇에 손을 대고 있나"를 본다.
+   집기 = 자산이고, 사람은 자기가 만지는 집기 앞에 서서 선으로 이어진다.
+   집기 종류로 성격을 구분한다: 서버랙 = system · 캐비닛 = data ·
+   워크벤치 = tool · 터미널 = mcp · 금고 테 = 비가역.                       */
+
+/* 화면 좌표 카드 — 벽에 글씨를 붙이면 아이소 평면에서 기울어 못 읽는다.
+   집기·게시판 위에 카드로 띄운다. */
+function card(pt, title, lines, accent, wide){
+  const pad = 6, lh = 13, wpx = wide || 150;
+  const hgt = 17 + lines.length*lh + pad;
+  const x = pt.x - wpx/2, y = pt.y - hgt;
+  ctx.fillStyle = "rgba(9,14,19,.93)"; ctx.fillRect(x, y, wpx, hgt);
+  ctx.strokeStyle = accent || "#2b3644"; ctx.lineWidth = 1;
+  ctx.strokeRect(x+.5, y+.5, wpx-1, hgt-1);
+  ctx.fillStyle = accent || "#2ab7a9"; ctx.fillRect(x, y, 3, hgt);
+  label(title, {x:x+pad, y:y+12}, "#d6e2f0", 11.5, "left", "bold");
+  lines.forEach((t,i) => label(t[0], {x:x+pad, y:y+27+i*lh}, t[1] || "#9fb0c2", 10.5, "left"));
+  return { x, y, w:wpx, h:hgt };
+}
+
+function roomShell(tint, note){
+  const rw = G.RW, rd = G.RD;
+  box(-0.7,-0.7, rw+1.4, rd+1.4, 18, 0, "#151d26", "#0b1116", "#080d11", -18);
+  slab(-0.7,-0.7, rw+1.4, rd+1.4, 0, 0, "#1b232c", "#0d141b");
+  slab(0, 0, rw, rd, 0, 0.5, tint, shade(tint,1.4));
+  for(let g=2; g<rw; g+=2){
+    const a = P(g,0,0,0.5), b = P(g,rd,0,0.5);
+    ctx.strokeStyle = "rgba(255,255,255,.035)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  const wc = shade(tint, 1.25);
+  box(0, -0.4, rw, 0.4, 62, 0, shade(wc,1.15), shade(wc,.8), shade(wc,.6));
+  box(-0.4, 0, 0.4, rd, 62, 0, shade(wc,1.05), shade(wc,.72), shade(wc,.55));
+  for(let i=1.5; i<rw-1; i+=3.2){                                   // 창
+    const p = P(i, -0.4, 0, 40);
+    ctx.fillStyle = "rgba(120,180,220,.13)";
+    ctx.fillRect(p.x, p.y, 34*S.cam.z, 20*S.cam.z);
+  }
+  // 문 — 앞쪽 왼편. 이 방으로 들어오는 관문이다.
+  box(-0.4, rd-2.6, 0.4, 2.2, 46, 0, "#2b3644", "#1e2833", "#18202a");
+  box(-0.25, rd-2.5, 0.15, 2.0, 42, 0, "#3d4a58", "#2b3644", "#222c37");
+  if(note) label(note, P(rw/2, rd+0.9, 0, 2), "#5d6d7e", 11*Math.max(.9,S.cam.z));
+}
+
+/* 비가역 자산은 금고처럼 테를 두른다 — 되돌릴 수 없는 것은 눈에 띄어야 한다. */
+function assetPiece(as, gx, gy){
+  const c = IRR_C[as.irreversibility] || "#5b6b7d";
+  if(as.irreversibility === "irreversible"){
+    box(gx-0.25, gy-0.25, 1.5, 1.5, 4, 0, "#2a1a1c", "#1d1214", "#170e10");
+    const p = P(gx+0.5, gy+1.25, 0, 5);
+    ctx.strokeStyle = "#dc2626"; ctx.lineWidth = Math.max(1, 1.5*S.cam.z);
+    ctx.strokeRect(p.x-14*S.cam.z, p.y-6*S.cam.z, 28*S.cam.z, 8*S.cam.z);
+  }
+  furniture(as.kind, gx, gy, 0, c);
+  return c;
+}
+
+const KIND_LABEL = { system:"서버랙", data:"캐비닛", tool:"워크벤치", mcp:"터미널" };
+
+function drawSectorRoom(w, h){
+  const f = S.state.floorplan.floors[levelByDiv(S.div)];
+  const z = f.sectors.find(s => s.short === S.room.id);
+  if(!z){ label("방을 찾을 수 없다", {x:w/2,y:h/2}, "#7d8fa3", 13, "center"); return; }
+  const tint = ZONE_TINT[z.sensitivity] || "#26313d";
+  roomShell(tint, z.cidr + " · " + z.security_level + " · " + z.sensitivity);
+
+  // 게시판 두 개 — 업무(선언)와 권한(컴파일된 실효 경계)
+  const who = f.authority.agents.filter(a => (a.effective||[]).length);
+  box(1.0, 0.35, 2.2, 0.3, 34, 0, "#243040", "#1a232e", "#151c25");
+  card(P(2.1, 0.35, 0, 60), "업무 (L3 SOP)",
+       z.works.length ? z.works.map(x => [x, "#8fb6dd"])
+                      : [["도는 업무 없음", "#5d6d7e"]], "#3b5a7a", 190);
+  box(G.RW-3.4, 0.35, 2.2, 0.3, 34, 0, "#243040", "#1a232e", "#151c25");
+  card(P(G.RW-2.3, 0.35, 0, 60), "권한 (이 층 실효 경계)",
+       who.length ? who.slice(0,3).map(a => [
+         a.name + " · " + a.autonomy + " · 도구 " + a.effective.length +
+         "종 / deny " + a.deny.length, "#9fb0c2"])
+       : [["배치된 에이전트 없음", "#5d6d7e"]], "#3f5f45", 250);
+
+  // 집기 = 자산. **손을 댄 자산만 카드**를 편다 — 전부 펴면 카드끼리 덮어
+  // 하나도 안 읽힌다. 나머지는 이름표만 붙인다 (고르면 카드가 펴진다).
+  const spots = {};
+  z.assets.forEach((as,i) => {
+    const gx = 1.5 + (i%3)*5.6, gy = 3.0 + Math.floor(i/3)*4.0;
+    spots[as.id] = { gx, gy };
+    const c = assetPiece(as, gx, gy);
+    // 고른 자산만 카드를 편다. 나머지는 이름표 한 줄(+접촉 있으면 게이트 한 줄).
+    // 전부 펴면 카드끼리 덮어 하나도 안 읽힌다.
+    const sel = S.sel.kind === "asset" && S.sel.id === as.id;
+    const gc = as.gate.block ? GATE_C.block
+             : as.gate.require_hitl ? GATE_C.require_hitl
+             : as.calls ? GATE_C.log_only : "#5d6d7e";
+    let hitBox;
+    if(sel){
+      const lines = [[ (KIND_LABEL[as.kind]||as.kind) + " · " + as.irreversibility, c ]];
+      if(as.calls){
+        lines.push([as.tools.map(t => t.tool + " " + t.calls).join(", "), "#cfdcea"]);
+        lines.push([Object.entries(as.gate).map(([k,v]) => k+" "+v).join(" · "), gc]);
+        lines.push(["만진 사람 " + (as.agents.join(", ") || "—"), "#7d8fa3"]);
+      } else {
+        lines.push(["접촉 기록 없음 — 아무도 손대지 않았다", "#5d6d7e"]);
+      }
+      hitBox = card(P(gx+0.5, gy, 0, 42), as.name, lines, c, 230);
+    } else {
+      const nm = as.name.length > 14 ? as.name.slice(0,13) + "…" : as.name;
+      const p = P(gx+0.5, gy, 0, 30);
+      label(nm, p, as.calls ? shade(c,1.6) : "#6b7b8c", 10.5*Math.max(.9,S.cam.z));
+      if(as.calls)
+        label(as.tools[0].tool + " " +
+              Object.entries(as.gate).map(([k,v]) => k+" "+v).join(" "),
+              {x:p.x, y:p.y + 12*Math.max(.9,S.cam.z)}, gc, 9.5*Math.max(.9,S.cam.z));
+      const half = Math.max(nm.length*4 + 8, 46);
+      hitBox = { x:p.x-half, y:p.y-9, w:half*2, h:as.calls ? 30 : 18 };
+    }
+    S.hit.push({ poly:[{x:hitBox.x,y:hitBox.y}, {x:hitBox.x+hitBox.w,y:hitBox.y},
+                       {x:hitBox.x+hitBox.w,y:hitBox.y+hitBox.h}, {x:hitBox.x,y:hitBox.y+hitBox.h}],
+      go:()=>{ S.sel = { kind:"asset", id:as.id }; draw(); },
+      tip:()=>"<b>" + esc(as.name) + "</b><br>" + esc(as.id) + " · " +
+              esc(as.kind) + " · " + esc(as.irreversibility) +
+              "<br><i>접촉 " + as.calls + "회 · 클릭하면 상세</i>" });
+  });
+
+  // 사람 — 지금 만지는 집기 앞에 서고, 그 집기와 선으로 이어진다.
+  S.state.agents.filter(a => a.division === f.division_id).forEach((a,i) => {
+    const seg = segAt(a.agent_id, S.clock);
+    if(!seg || seg.kind !== "work" || seg.zone !== z.short) return;
+    const sp = spots[seg.asset] || { gx: G.RW/2, gy: G.RD-2.5 };
+    const pt = P(sp.gx + 0.5, sp.gy + 1.9 + (i%2)*0.7, 0, 0.5);
+    const ap = P(sp.gx + 0.5, sp.gy + 0.5, 0, 12);
+    ctx.strokeStyle = GATE_C[seg.gate] || "#2ab7a9";
+    ctx.lineWidth = Math.max(1, 1.6*S.cam.z); ctx.globalAlpha = .8;
+    ctx.beginPath(); ctx.moveTo(pt.x, pt.y - 16*S.cam.z); ctx.lineTo(ap.x, ap.y); ctx.stroke();
+    ctx.globalAlpha = 1;
+    person(ctx, a, pt.x, pt.y, 3.6*S.cam.z);
+    label(a.name, {x:pt.x, y:pt.y + 11*S.cam.z}, "#cfdcea", 11*S.cam.z);
+    label(seg.tool + "  gate=" + (seg.gate||"-") + "  sev " + seg.severity,
+          {x:pt.x, y:pt.y + 23*S.cam.z}, GATE_C[seg.gate] || "#7d8fa3", 10.5*S.cam.z);
+    S.hit.push({ circle:{ x:pt.x, y:pt.y-18*S.cam.z, r:20*S.cam.z },
+      go:()=>{ S.view="desk"; S.agent=a.agent_id; loadTrace(a.last_trace).then(draw); draw(); },
+      tip:()=>agentTip(a, { seg }) });
+  });
+
+  const inside = S.state.agents.filter(a => {
+    const s = segAt(a.agent_id, S.clock);
+    return s && s.kind === "work" && s.zone === z.short;
+  });
+  if(!inside.length)
+    label("지금 이 방에 있는 사람 없음 — ▶ 로 재생하면 들어오는 순간이 보인다",
+          {x:w/2, y:h-26}, "#4a5967", 11.5, "center");
+}
+
+function drawTeamRoom(w, h){
+  const f = S.state.floorplan.floors[levelByDiv(S.div)];
+  const div = S.state.divisions.find(d => d.division_id === S.div) || { teams:[] };
+  const t = div.teams.find(x => x.team_id === S.room.id);
+  if(!t){ label("팀을 찾을 수 없다", {x:w/2,y:h/2}, "#7d8fa3", 13, "center"); return; }
+  roomShell("#232d38", t.eg_org + " · zone:" + t.zone + " · 최대 민감도 " +
+            (t.max_sensitivity || "—"));
+
+  box(1.0, 0.35, 2.6, 0.3, 34, 0, "#243040", "#1a232e", "#151c25");
+  card(P(2.3, 0.35, 0, 60), "팀 업무",
+       [[t.mission || "미션 미기재", "#cfdcea"],
+        ["업무 도메인 " + (t.work_domains.join(", ") || "—"), "#8fb6dd"],
+        ["에스컬레이션 " + (t.escalation_to || "없음"), "#7d8fa3"]], "#3b5a7a", 260);
+
+  const mine = f.authority.agents.filter(a => a.team === t.team_id);
+  box(G.RW-3.8, 0.35, 2.6, 0.3, 34, 0, "#243040", "#1a232e", "#151c25");
+  card(P(G.RW-2.5, 0.35, 0, 60), "팀 권한",
+       mine.length ? [
+         ["실효 도구 " + new Set(mine.flatMap(a => a.effective)).size + "종", "#8fd6a1"],
+         ["deny " + new Set(mine.flatMap(a => a.deny)).size + "종", "#e5a0a0"],
+         ["자율화 " + mine.map(a => a.autonomy).join(", "), "#9fb0c2"],
+         ["모델 " + mine.map(a => a.model_policy).join(", "), "#9fb0c2"],
+       ] : [["배치된 에이전트 없음 — 권한도 없다", "#5d6d7e"]], "#3f5f45", 250);
+
+  // 데스크 = 사람 자리. 자리에 없으면 지금 어디 있는지 적는다.
+  const roster = S.state.agents.filter(a => a.team === t.team_id);
+  if(!roster.length)
+    label("이 팀에는 아직 에이전트가 없다 — 조직은 있고 사람이 없다",
+          P(G.RW/2, G.RD/2, 0, 14), "#5d6d7e", 12*Math.max(.9,S.cam.z));
+  roster.forEach((a,i) => {
+    const gx = 1.8 + (i%3)*5.8, gy = 4.8 + Math.floor(i/3)*4.2;
+    desk(gx, gy, 0, a.division_color);
+    box(gx+2.1, gy+0.1, 0.5, 0.5, 22, 0, "#2b3644", "#212a35", "#1a222b");   // 캐비닛
+    const au = f.authority.agents.find(x => x.agent_id === a.agent_id) || {};
+    const seg = segAt(a.agent_id, S.clock);
+    card(P(gx+0.85, gy, 0, 36), a.name,
+         [[a.autonomy + " · " + (a.badge || "모델 미기록") + " · " + (au.model_policy||""), "#9fb0c2"],
+          ["도구 " + ((au.effective||[]).length) + "종 / deny " + ((au.deny||[]).length), "#8fd6a1"],
+          [seg ? (seg.kind === "desk" ? "지금 자리에서 " + (seg.tool || seg.span)
+                                      : "지금 " + seg.zone + " 섹터에 있다 — " + seg.tool)
+               : "지금 휴게실 (업무 없음)",
+           seg ? (seg.kind === "desk" ? "#2ab7a9" : GATE_C[seg.gate] || "#f59e0b") : "#5d6d7e"]],
+         a.division_color, 240);
+    if(seg && seg.kind === "desk"){
+      const pt = P(gx+0.9, gy+2.0, 0, 0.5);
+      person(ctx, a, pt.x, pt.y, 3.6*S.cam.z);
+      S.hit.push({ circle:{ x:pt.x, y:pt.y-18*S.cam.z, r:20*S.cam.z },
+        go:()=>{ S.view="desk"; S.agent=a.agent_id; loadTrace(a.last_trace).then(draw); draw(); },
+        tip:()=>agentTip(a, { seg }) });
+    } else {
+      label(seg ? "자리 비움 — " + seg.zone + " 섹터" : "자리 비움 — 휴게실",
+            P(gx+0.9, gy+2.0, 0, 8), seg ? "#f59e0b" : "#4a5967",
+            10.5*Math.max(.9,S.cam.z));
+    }
+  });
+  void w; void h;
+}
+
+function drawRoom(w, h){
+  if(S.room.kind === "team") drawTeamRoom(w, h); else drawSectorRoom(w, h);
+}
+
+/* ── 뷰 4: 데스크 (에이전트 1명 — 실행 트레이스) ──────────────────────── */
 
 function drawDesk(w, h){
   drawFloor(w, h);
@@ -929,6 +1145,7 @@ function draw(){
   ctx.fillStyle = "#070a0e"; ctx.fillRect(0,0,w,h);
   if(S.view === "building") drawBuilding(w,h);
   else if(S.view === "floor") drawFloor(w,h);
+  else if(S.view === "room") drawRoom(w,h);
   else drawDesk(w,h);
   renderCrumb(); renderSide(); renderLegend(); renderStats();
 }
@@ -946,8 +1163,20 @@ function renderCrumb(){
   const a = S.state.agents.find(x => x.agent_id === S.agent);
   const parts = ['<a onclick="go(\'building\')">사옥</a>'];
   if(S.view !== "building" && d) parts.push('<a onclick="go(\'floor\')">' + esc(d.name) + "</a>");
+  if(S.room.kind) parts.push('<a onclick="go(\'room\')">' + esc(roomTitle()) + "</a>");
   if(S.view === "desk" && a) parts.push(esc(a.name));
   crumb.innerHTML = "› " + parts.join(" › ");
+}
+
+function roomTitle(){
+  const f = S.state.floorplan.floors[levelByDiv(S.div)];
+  if(S.room.kind === "sector"){
+    const z = (f.sectors||[]).find(s => s.short === S.room.id);
+    return z ? z.pixel_room : S.room.id;
+  }
+  const div = S.state.divisions.find(x => x.division_id === S.div) || { teams:[] };
+  const t = div.teams.find(x => x.team_id === S.room.id);
+  return t ? t.name : S.room.id;
 }
 
 function renderLegend(){
@@ -967,6 +1196,14 @@ function renderLegend(){
       sw(IRR_C.execute) + "실행" + sw(IRR_C.write) + "쓰기" + sw(IRR_C.read) + "읽기<br>" +
       "<b>주황 문</b> = pipe(PEP) — 존을 넘을 때 지난다 &nbsp; <b>데스크 섬</b> = 팀<br>" +
       "<b>방·팀·휴게실을 클릭</b>하면 오른쪽에 업무·권한 상세가 나온다";
+  } else if(S.view === "room"){
+    el.innerHTML =
+      "<b>집기 = 자산</b> &nbsp; 서버랙=system · 캐비닛=data · 워크벤치=tool · 터미널=mcp " +
+      "&nbsp; <b>붉은 테</b> = 비가역<br>" +
+      "<b>사람에서 집기로 이어진 선</b> = 지금 그 자산에 손을 대고 있다는 뜻 · " +
+      "선 색 = 게이트 판정 " + sw(GATE_C.block) + "block " + sw(GATE_C.require_hitl) + "HITL " +
+      sw(GATE_C.log_only) + "log_only<br>" +
+      "<b>왼쪽 게시판</b> = 업무(L3 SOP) &nbsp; <b>오른쪽 게시판</b> = 권한(실효 경계)";
   } else {
     el.innerHTML =
       "<b>얼굴</b>(머리·안경·수염) = agent_id 고정 해시 → 늘 같은 사람 &nbsp;" +
@@ -1213,9 +1450,9 @@ function renderSide(){
   const st = S.state;
   let html = "";
 
-  if(S.view === "floor") html += renderFloorDetail();
+  if(S.view === "floor" || S.view === "room") html += renderFloorDetail();
 
-  const roster = S.view === "floor"
+  const roster = (S.view === "floor" || S.view === "room")
     ? st.agents.filter(a => a.division === S.div) : st.agents;
   html += "<h2>인원 (" + roster.length + ")</h2>";
   html += roster.map(a => {
@@ -1448,6 +1685,23 @@ function frame(b, padX, padY, lo, hi){
   S.cam.y = r.height/2 - (b.y0+b.y1)/2*z;
 }
 const fitCam = () => frame(bounds(), 70, 50, 0.22, 2.4);
+function roomBounds(){
+  const save = { x:S.cam.x, y:S.cam.y, z:S.cam.z };
+  S.cam = { x:0, y:0, z:1 };
+  let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
+  [[-0.7,-0.7],[G.RW+0.7,-0.7],[G.RW+0.7,G.RD+0.7],[-0.7,G.RD+0.7]].forEach(([gx,gy]) => {
+    [0, 96].forEach(lift => { const p = P(gx,gy,0,lift);
+      x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); });
+  });
+  S.cam = save;
+  return { x0, y0, x1, y1 };
+}
+function enterRoom(kind, id){
+  S.view = "room"; S.room = { kind, id }; S.agent = null;
+  S.sel = { kind, id };
+  frame(roomBounds(), 90, 110, 0.3, 2.6);
+  draw();
+}
 const focusLevel = level => frame(bounds(clamp(level, 0, S.plan.levels.length-1)),
                                   80, 90, 0.3, 2.4);
 
@@ -1530,11 +1784,14 @@ window.go = v => {
   if(v === "building"){ S.view = "building"; S.agent = null; S.spans = [];
                         S.sel = {kind:"", id:""}; fitCam(); }
   if(v === "floor"){ S.view = "floor"; S.agent = null; S.spans = [];
-                     S.sel = {kind:"floor", id:S.div}; focusLevel(levelByDiv(S.div)); }
+                     S.sel = {kind:"floor", id:S.div}; S.room = {kind:"", id:""};
+                     focusLevel(levelByDiv(S.div)); }
+  if(v === "room" && S.room.kind) enterRoom(S.room.kind, S.room.id);
   draw();
 };
 document.getElementById("btn-back").onclick = () =>
-  go(S.view === "desk" ? "floor" : "building");
+  go(S.view === "desk" ? (S.room.kind ? "room" : "floor")
+   : S.view === "room" ? "floor" : "building");
 document.getElementById("btn-reload").onclick = async () => { await load(); say("상태 갱신됨"); };
 addEventListener("resize", () => draw());
 addEventListener("keydown", e => {

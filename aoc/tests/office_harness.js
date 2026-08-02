@@ -38,11 +38,11 @@ function ctxStub() {
     beginPath: function () { this._path = []; },
     closePath: function () {},
     moveTo: function (x, y) {
-      if (!isFinite(x) || !isFinite(y)) CALLS.warn.push("moveTo NaN");
+      if (!isFinite(x) || !isFinite(y)) CALLS.warn.push("moveTo NaN @" + S.view + "/" + (S.room && S.room.kind));
       this._path.push([x, y]);
     },
     lineTo: function (x, y) {
-      if (!isFinite(x) || !isFinite(y)) CALLS.warn.push("lineTo NaN");
+      if (!isFinite(x) || !isFinite(y)) CALLS.warn.push("lineTo NaN @" + S.view + "/" + (S.room && S.room.kind));
       this._path.push([x, y]);
     },
     fill: function () {
@@ -80,7 +80,9 @@ function record(view, divId, agentId, clockNs) {
   if (divId) S.div = divId;
   if (agentId) S.agent = agentId;
   if (clockNs) setClock(clockNs, true);
-  if (view === "building") fitCam(); else focusLevel(levelByDiv(S.div));
+  if (view === "building") fitCam();
+  else if (view === "floor" || view === "desk") focusLevel(levelByDiv(S.div));
+  else if (S.view === "room") frame(roomBounds(), 90, 110, 0.3, 2.6);
   if (typeof SEL === "object" && SEL) S.sel = SEL;
   DL = []; REC = true;
   draw();
@@ -197,14 +199,24 @@ function runChecks() {
     var realDrawLevel = drawLevel;
     drawLevel = function (lv, alpha) { seen.push(lv.level); return realDrawLevel(lv, alpha); };
 
-    // 1. 세 뷰가 전부 그려진다 (죽지 않는다)
-    ["building", "floor", "desk"].forEach(function (v) {
-      S.view = v;
-      S.div = S.state.floorplan.floors[0].division_id;
+    // 1. 네 뷰가 전부 그려진다 (죽지 않는다)
+    var busyDiv = S.state.floorplan.floors.reduce(function (a, b) {
+      return b.work.runs > a.work.runs ? b : a; }).division_id;
+    ["building", "floor", "room", "roomTeam", "desk"].forEach(function (v) {
+      S.div = busyDiv;
       S.agent = S.state.agents[0].agent_id;
       S.spans = TRACE;
       S.sel = { kind: "floor", id: S.div };
-      if (v === "building") fitCam(); else focusLevel(levelByDiv(S.div));
+      var f = S.state.floorplan.floors.find(function (x) { return x.division_id === S.div; });
+      if (v === "room") { enterRoom("sector", (f.sectors.filter(function (s) {
+        return s.entries; })[0] || f.sectors[0]).short); }
+      else if (v === "roomTeam") {
+        var div = S.state.divisions.find(function (d) { return d.division_id === S.div; });
+        enterRoom("team", div.teams[0].team_id);
+      } else {
+        S.view = v; S.room = { kind: "", id: "" };
+        if (v === "building") fitCam(); else focusLevel(levelByDiv(S.div));
+      }
       var before = CALLS.fillRect + CALLS.poly + CALLS.text;
       seen = [];
       draw();
@@ -212,6 +224,7 @@ function runChecks() {
       out.levels[v] = seen.slice();
     });
     drawLevel = realDrawLevel;
+    S.room = { kind: "", id: "" };
 
     // 2b. 층 상세 패널 — 업무·권한이 실제로 붙었나
     S.view = "floor"; S.div = S.state.floorplan.floors[0].division_id;
