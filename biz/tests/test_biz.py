@@ -454,3 +454,72 @@ def test_approval_chain_points_at_real_portal_accounts(root):
                                                division=div, origin="external"):
                 assert c["portal_user"] in users, \
                     f"{bid}/{t}: 결재자 {c['portal_user']} 계정이 없다"
+
+
+# ── 착수·검수 (P7 DoD-5) ─────────────────────────────────────────────────
+
+
+def _run(searched=True, recorded=True, blocked=(), output="산출물 본문", error=""):
+    from dawn_agents.worker import Step, WorkerRun
+
+    r = WorkerRun(agent_id="wo1-builder", task="업무")
+    if searched:
+        r.steps.append(Step(1, "eg_search", "q", True, None))
+    r.steps.append(Step(2, "run", "doc.search", True, None))
+    r.recorded, r.blocked, r.output, r.error = recorded, list(blocked), output, error
+    return r
+
+
+@pytest.mark.parametrize("kw, failing", [
+    ({}, None),
+    ({"searched": False}, "loop_start"),
+    ({"recorded": False}, "loop_end"),
+    ({"blocked": ["pay.execute"]}, "not_blocked"),
+    ({"output": "   "}, "has_output"),
+])
+def test_machine_review_reads_only_what_the_run_left(kw, failing):
+    """SOP 본문을 파싱하지 않는다 — 문서 형식에 묶이면 깨진다.
+    워커 루프가 남긴 사실만 본다."""
+    from dawn_biz.execute import review
+
+    v = review(_run(**kw), with_judge=False)
+    bad = [k for k, ok in v.machine.items() if not ok]
+    assert bad == ([failing] if failing else [])
+    assert v.passed is (failing is None)
+
+
+def test_failed_stage_does_not_pass(kw=None):
+    """검수를 통과 못 한 산출물로 다음 단계가 시작되면 단계 구분이 장식이 된다."""
+    from dawn_biz.execute import review
+
+    assert not review(_run(recorded=False), with_judge=False).passed
+
+
+def test_high_risk_stage_needs_human_even_when_clean():
+    from dawn_biz.execute import review
+
+    v = review(_run(), with_judge=False, high_risk=True)
+    assert v.machine_ok and v.needs_human and not v.passed
+
+
+def test_unjudged_is_not_treated_as_failure():
+    """판정 못 한 것과 실패는 다르다 — 모델이 죽었다고 에이전트를 벌하지 않는다."""
+    from dawn_biz.execute import review
+
+    v = review(_run(), with_judge=False)
+    assert v.quality is None and v.passed
+
+
+def test_cannot_start_before_approval_and_crew(tmp_path, root):
+    """착수는 승인·편성 뒤에만. 둘 중 하나만 있어도 안 된다."""
+    from dawn_biz.execute import can_start
+
+    s = BizStore(tmp_path, tenant=0)
+    wid = s.add_work_order(title="[테스트] 착수", body="", business="ax-consulting",
+                           division="ax", infra_tier="container")
+    ok, why = can_start(s, wid)
+    assert not ok and "결재" in why
+
+    s.set_work_order_status(wid, "approved")
+    ok, why = can_start(s, wid)
+    assert not ok and "편성" in why, why

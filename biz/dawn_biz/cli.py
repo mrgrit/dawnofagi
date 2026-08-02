@@ -324,6 +324,113 @@ def cmd_orders(args) -> int:
     return 0
 
 
+def cmd_crew(args) -> int:
+    """작업 지시에 에이전트를 편성한다 (P7 DoD-4).
+
+    **결재가 끝나야 만든다.** 편성은 권한을 만드는 행위다.
+    """
+    from dawn_core import Registry, workintake
+    from dawn_core.crew import CrewError, Member, disband, form, formed
+
+    root = _root()
+    s = _store(args)
+    r = s.work_order(args.id)
+    if r is None:
+        print(f"작업 지시 없음: {args.id}")
+        return 2
+
+    if args.disband:
+        gone = disband(root, order_id=args.id)
+        print(f"{B}편성 회수{Z}  {len(gone)}명  {D}{', '.join(gone) or '없음'}{Z}")
+        return 0
+
+    have = formed(root, order_id=args.id)
+    if have and not args.force:
+        print(f"{B}이미 편성됨{Z}  {', '.join(have)}")
+        print(f"  {D}회수: dawn-biz crew {args.id} --disband{Z}")
+        return 0
+
+    chain = workintake.approval_chain(root, business=r["business"],
+                                      infra_tier=r["infra_tier"],
+                                      division=r["division"], origin=r["origin"])
+    decided = s.work_order_approvals(args.id)
+    approved = r["status"] == "approved" or (
+        bool(chain) and workintake.next_approver(chain, decided) is None
+        and all(d["decision"] == "approved" for d in decided))
+
+    reg = Registry.load(root)
+    team = args.team or next(
+        (t for t in reg.divisions[r["division"]].data.get("teams", [])
+         if (reg.teams[t].dir / "AGENT_TEAM.md").is_file()), "")
+    if not team:
+        print(f"{R}편성할 팀이 없다{Z} — {r['division']} 본부의 팀 중 "
+              "AGENT_TEAM.md(L2) 가 있는 팀이 없다")
+        return 2
+
+    works = [args.work] if args.work else []
+    m = Member(role_key=args.role, name=f"{r['title'][:24]} 담당", team=team,
+               persona=reg.teams[team].data.get("persona_default", "corporate"),
+               works=works, tools=args.tools.split(",") if args.tools else
+               ["eg.search", "eg.record", "skill.preview", "doc.search"],
+               zone=r["zone"] or "", mission=r["title"])
+
+    if args.dry_run:
+        from dawn_core.crew import plan
+
+        print(f"{B}편성안{Z} (작업 지시 #{args.id}) {D}— 쓰지 않는다{Z}")
+        for p2 in plan(root, order_id=args.id, members=[m]):
+            over = f"  {R}경계 밖: {', '.join(p2['over_scope'])}{Z}" if p2["over_scope"] else ""
+            print(f"  {p2['agent_id']:<22} {p2['team']:<14} {', '.join(p2['tools'])}{over}")
+        print(f"  결재 {'완료' if approved else R + '미완' + Z}")
+        return 0
+
+    try:
+        made = form(root, order_id=args.id, members=[m], approved=approved)
+    except CrewError as e:
+        print(f"{R}편성 실패{Z}\n  {e}")
+        return 2
+    s.set_work_order_status(args.id, "in_progress")
+    print(f"{B}편성{Z}  {', '.join(made)}")
+    print(f"  {D}착수: dawn-biz start {args.id}{Z}")
+    return 0
+
+
+def cmd_start(args) -> int:
+    """편성된 에이전트를 돌리고 산출물을 검수한다 (P7 DoD-5)."""
+    from dawn_agents import Worker
+
+    from dawn_biz.execute import can_start, review, stage_plan
+
+    root = _root()
+    s = _store(args)
+    ok, why = can_start(s, args.id)
+    if not ok:
+        print(f"{R}착수할 수 없다{Z} — {why}")
+        return 2
+
+    r = s.work_order(args.id)
+    stages = stage_plan(root, order_id=args.id)
+    print(f"{B}작업 지시 #{args.id}{Z}  {r['title']}")
+    print(f"  {D}편성 {len(stages)}명 · 환경 {r['infra_tier']}{Z}\n")
+
+    verdicts = []
+    for st in stages:
+        print(f"  {B}{st['agent_id']}{Z} 착수…")
+        w = Worker(st["agent_id"])
+        run = w.run(f"{r['title']}\n\n{r['body']}", purpose="work")
+        v = review(run, eg_store=w.eg, with_judge=not args.no_judge,
+                   high_risk=r["infra_tier"] in ("vm", "server"))
+        verdicts.append(v)
+        print(v.line())
+
+    passed = all(v.passed for v in verdicts)
+    s.set_work_order_status(args.id, "done" if passed else "reviewing_output")
+    print(f"\n  {B}검수{Z}  {'전부 통과 → 완료' if passed else '미통과 → 산출물 검토'}")
+    if not passed:
+        print(f"  {D}통과 못 한 산출물로 다음 단계는 시작하지 않는다{Z}")
+    return 0 if passed else 1
+
+
 def cmd_seed(args) -> int:
     from .seed import seed_all
 
@@ -391,6 +498,22 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--status", default="")
     x.add_argument("--origin", default="", choices=["", "external", "internal", "standing"])
     x.set_defaults(func=cmd_orders)
+
+    x = s.add_parser("crew", help="작업 지시에 에이전트 편성 (P7)")
+    x.add_argument("id", type=int)
+    x.add_argument("--role", default="builder")
+    x.add_argument("--team", default="")
+    x.add_argument("--work", default="")
+    x.add_argument("--tools", default="")
+    x.add_argument("--dry-run", action="store_true", help="편성안만 보고 쓰지 않는다")
+    x.add_argument("--disband", action="store_true", help="편성 회수")
+    x.add_argument("--force", action="store_true")
+    x.set_defaults(func=cmd_crew)
+
+    x = s.add_parser("start", help="편성된 에이전트 착수 + 산출물 검수 (P7)")
+    x.add_argument("id", type=int)
+    x.add_argument("--no-judge", action="store_true", help="품질 판정 생략 (GPU 없이)")
+    x.set_defaults(func=cmd_start)
 
     x = s.add_parser("seed", help="데모 업무 데이터")
     x.add_argument("--force", action="store_true")

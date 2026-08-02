@@ -387,3 +387,53 @@ DoD-7 의 "보상 업무" 를 어디까지 볼지.
    전제한다. 가장 안전하지만 hand-off 가 파일 교환으로 제한된다.
 
 지금은 정하지 않아도 DoD-1·2 는 진행된다. **DoD-3(할당)에서 필요**하다.
+
+
+---
+
+## Q11 — 일을 받을 수 있는 팀이 4/17 뿐이다 (L2 공백)
+
+P7 DoD-4 를 돌리다 드러났다. 편성은 **팀에 `AGENT_TEAM.md`(L2)가 있어야** 가능한데
+(없으면 규칙 없이 일하는 팀이 된다), 실제로 있는 팀은 4개뿐이다:
+
+```
+✔ aoc-dev · corp-admin · corp-cs · itops-ccc
+—  나머지 13팀 (aoc-ops, aoc-lab, ax-university, ax-security, ax-marketing,
+   corp-hr, corp-finance, corp-marketing, corp-sales, corp-secretary,
+   itops-datacenter, itops-support, itops-bizsupport)
+```
+
+**특히 AX본부는 3팀 전부 L2 가 없다.** 그런데 `ax-consulting` 사업은 `status: active`
+다 — **활성 사업인데 일을 받을 수 있는 팀이 하나도 없다.** 홈페이지에서 AX 작업
+요청을 접수하면 결재까지는 가지만 편성에서 멈춘다.
+
+L2 는 그 팀 에이전트 전체의 행동 규칙이라 **자동 생성하지 않기로 했다.** 사람이 써야
+한다. 우선순위를 정해 달라 — 첫 고객이 대학 AX 라면 `ax-university` 가 먼저다.
+
+## Q12 — 경영관리부는 어느 사업의 소관도 아니다
+
+같은 작업 중 드러났다. 작업 지시는 사업을 골라야 하고 담당 본부는 그 사업의
+`owning_divisions` 에서 나오는데:
+
+```
+aoc-platform      → aoc, itops
+ax-consulting     → ax
+foundation-model  → aoc
+경영관리부(corp)   → 어느 사업에도 없다
+```
+
+그래서 **경리·문의·인사 같은 내부 지원 업무는 작업 지시를 만들 수 없다.**
+경영관리부는 실제로 일하는데(경비 처리·고객 문의 응대) 파이프라인에 진입할 통로가 없다.
+
+**선택지:**
+
+1. **사업 없는 작업 지시를 허용한다** ← 권장. 내부 지원 업무는 수익 사업이 아니다.
+   `business` 를 비우고 `division` 을 직접 고르게 한다. 인프라 등급은 기본 `none`,
+   결재는 담당 본부장.
+2. `corp` 를 `aoc-platform` 의 `owning_divisions` 에 넣는다 — 사실과 다르다.
+   경영관리는 그 사업을 소유하지 않는다.
+3. 내부 지원 사업(`internal-ops`)을 하나 만든다 — 사업 목록이 실제 사업과 관리
+   기능을 섞게 된다.
+
+1번을 권하는 이유: **사업은 돈을 버는 단위이고 본부는 일하는 단위**라 원래 1:1 이
+아니다. 지금 모델이 그 둘을 묶어 놨다.
