@@ -83,6 +83,12 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
                 "agents": agents,
                 "runs": len(t_runs),
                 "activity": sum(r.steps for r in t_runs),
+                # ── 업무·권한 (매니페스트가 권위) ──────────────────────
+                "mission": t.data.get("mission", ""),
+                "persona_default": t.data.get("persona_default", ""),
+                "work_domains": list(t.data.get("work_domains", [])),
+                "max_sensitivity": t.data.get("max_sensitivity", ""),
+                "escalation_to": t.data.get("escalation_to") or "",
             })
         d_runs = [r for r in runs if r.division == did]
         divisions.append({
@@ -136,6 +142,10 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         })[:6]
         a["last_trace"] = mine[0].trace_id if mine else ""
 
+    # ── 권한 = 컴파일된 실효 경계 (문장이 아니라 기계가 강제하는 값) ──
+    for a in agents:
+        a["authority"] = _authority(reg, a["agent_id"])
+
     # ── 점유 = 스팬. 없는 시각은 대기실 ────────────────────────────────
     occupancy = _occupancy(runs, zones, {a["agent_id"]: a.get("zone", "") for a in agents})
     for a in agents:
@@ -155,7 +165,8 @@ def build_state(root: Path, *, limit: int = 200, judges: dict | None = None) -> 
         "collect": lake.stats(runs),
         "divisions": divisions,
         "zones": zones,
-        "floorplan": _floorplan(divisions, zones, agents, occupancy),
+        "floorplan": _floorplan(divisions, zones, agents, occupancy, runs, cases,
+                                queue, reg),
         "occupancy": occupancy,
         "window": _window(occupancy),
         "agents": agents,
@@ -216,16 +227,60 @@ def _occupancy(runs, zones: list[dict[str, Any]],
     return segs
 
 
+# org/tools.yaml: action 생략 시 risk 에서 추정한다 (LOW=read / MED=write / HIGH=execute)
+_ACTION_FALLBACK = {"LOW": "read", "MED": "write", "HIGH": "execute"}
+
+
+def _authority(reg, agent_id: str) -> dict[str, Any]:
+    """이 에이전트의 **실효 경계**. 문장이 아니라 게이트 체인을 병합한 결과다.
+
+    통제 평면(L1→L4)이 단조 축소되며 겹쳐진 최종값이고, 에이전트는 이걸 넘을 수
+    없다. 콘솔에 이 값을 그대로 띄우는 이유: "무엇을 할 수 있나"를 문서에서
+    유추하게 두면 아무도 확인하지 않는다.
+    """
+    from dawn_core.control_plane import compile_agent
+
+    try:
+        c = compile_agent(reg, agent_id)
+    except Exception as e:                       # 컴파일 실패도 표시해야 할 사실이다
+        return {"error": f"{type(e).__name__}: {e}"}
+    g = c.gate.to_dict(c.declared_tools)
+    return {
+        "allow": g["tools"]["allow_patterns"],
+        "deny": g["tools"]["deny_patterns"],
+        "effective": g["tools"].get("effective", []),
+        "declared": c.declared_tools,
+        "autonomy": g["autonomy"],
+        "hitl_require_on": g["hitl"]["require_on"],
+        "amount_threshold_krw": g["hitl"].get("amount_threshold_krw"),
+        "budget": g["budget"],
+        "model_policy": g["model"]["policy"],
+        "model_pinned": g["model"].get("pinned", ""),
+        "force_local_when": g["model"]["force_local_when"],
+        "sources": g["sources"],                 # 어느 계층이 이 경계를 좁혔나
+        "layers": [{"level": ly.level, "label": ly.label} for ly in c.layers],
+        "works": list(c.works),                  # L3 — 수행하는 업무 SOP
+        "role": c.role,
+        "warnings": list(c.warnings),
+    }
+
+
 def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
-               agents: list[dict[str, Any]], occ: list[dict[str, Any]]) -> dict[str, Any]:
+               agents: list[dict[str, Any]], occ: list[dict[str, Any]],
+               runs, cases, queue, reg) -> dict[str, Any]:
     """빌딩 = 층(본부) × 섹터(존, 리스크 순) + 대기실.
 
     층에 그리는 섹터는 **그 본부가 실제로 쓰는 존만**이다: 팀 매니페스트가
     선언한 존 ∪ 에이전트의 홈 존 ∪ 텔레메트리가 실제로 들어간 존. 안 쓰는 방을
     그려 두면 빈 방이 정상인지 장애인지 구분이 안 된다.
+
+    층마다 **업무(무엇이 실제로 돌았나)** 와 **권한(무엇을 할 수 있나)** 을 같이
+    싣는다. 둘을 나란히 놔야 "권한은 있는데 안 쓴다 / 쓰는데 권한이 아슬아슬하다"가
+    보인다.
     """
     by_short = {z["short"]: z for z in zones}
     div_of = {a["agent_id"]: a["division"] for a in agents}
+    catalog = reg.tool_catalog.tools
 
     visits: dict[tuple[str, str], int] = {}
     for s in occ:
@@ -236,8 +291,9 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
     floors = []
     for level, d in enumerate(divisions):
         did = d["division_id"]
+        mine = [a for a in agents if a["division"] == did]
         used = {t["zone"] for t in d["teams"] if t["zone"]}
-        used |= {a["zone"] for a in agents if a["division"] == did and a.get("zone")}
+        used |= {a["zone"] for a in mine if a.get("zone")}
         used |= {z for (dv, z) in visits if dv == did}
         sectors = [
             {**by_short[z], "visits": visits.get((did, z), 0),
@@ -245,11 +301,14 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
             for z in used if z in by_short and not by_short[z]["is_gate"]
         ]
         sectors.sort(key=lambda z: (_sec_rank(z), z["short"]))
+
         floors.append({
             "level": level, "division_id": did, "name": d["name"], "color": d["color"],
             "zone": d["zone"], "runs": d["runs"], "activity": d["activity"],
             "sectors": sectors,
-            "agents": [a["agent_id"] for a in agents if a["division"] == did],
+            "agents": [a["agent_id"] for a in mine],
+            "work": _floor_work(did, mine, occ, runs, cases, queue, catalog),
+            "authority": _floor_authority(mine, d["teams"]),
         })
 
     return {
@@ -257,6 +316,87 @@ def _floorplan(divisions: list[dict[str, Any]], zones: list[dict[str, Any]],
         "lounge": LOUNGE,
         # pipe = 방이 아니라 섹터 사이의 문. 층마다 섹터 경계에 세운다.
         "gates": [z for z in zones if z["is_gate"]],
+    }
+
+
+def _floor_work(did: str, mine: list[dict[str, Any]], occ: list[dict[str, Any]],
+                runs, cases, queue, catalog: dict[str, Any]) -> dict[str, Any]:
+    """이 층에서 **실제로 돌아간 업무**. 전부 텔레메트리·케이스·승인 큐에서 온다."""
+    ids = {a["agent_id"] for a in mine}
+    segs = [s for s in occ if s["agent_id"] in ids]
+    my_runs = [r for r in runs if r.agent_id in ids]
+
+    tools: dict[str, dict[str, Any]] = {}
+    for s in segs:
+        if not s["tool"]:
+            continue
+        meta = catalog.get(s["tool"], {})
+        risk = meta.get("risk", "")
+        t = tools.setdefault(s["tool"], {
+            "tool": s["tool"], "calls": 0, "gate": {}, "zones": [], "risk": risk,
+            # action 이 생략된 도구는 risk 에서 추정한다 (org/tools.yaml 의 보수적 폴백)
+            "action": meta.get("action") or _ACTION_FALLBACK.get(risk, ""),
+            "destructive": bool(meta.get("destructive", False)),
+        })
+        t["calls"] += 1
+        if s["gate"]:
+            t["gate"][s["gate"]] = t["gate"].get(s["gate"], 0) + 1
+        if s["zone"] not in t["zones"]:
+            t["zones"].append(s["zone"])
+    ranked = sorted(tools.values(), key=lambda t: (-t["calls"], t["tool"]))
+
+    decisions: dict[str, int] = {}
+    for r in my_runs:
+        for k, v in r.gate_decisions.items():
+            decisions[k] = decisions.get(k, 0) + v
+
+    return {
+        "runs": len(my_runs),
+        "complete": sum(1 for r in my_runs if r.complete),
+        "tokens": sum(r.tokens for r in my_runs),
+        "tools": ranked,
+        "gate_decisions": decisions,
+        "blocked": sorted({b for r in my_runs for b in r.blocked}),
+        "assets": sorted({s["asset"] for s in segs if s["asset"]}),
+        "hitl": [a.to_dict() for a in queue.list() if a.agent_id in ids][:12],
+        "cases": [c.to_dict() for c in cases if c.agent_id in ids][:12],
+        "recent": [
+            {"trace_id": r.trace_id, "agent_id": r.agent_id, "started_ns": r.started_ns,
+             "steps": r.steps, "status": r.status, "complete": r.complete,
+             "tools": r.tool_sequence[:8], "model": r.model,
+             "max_severity": r.max_severity}
+            for r in my_runs[:8]
+        ],
+        "division_id": did,
+    }
+
+
+def _floor_authority(mine: list[dict[str, Any]],
+                     teams: list[dict[str, Any]]) -> dict[str, Any]:
+    """이 층이 **가진 권한**. 에이전트별 실효 경계를 층 단위로 접는다."""
+    auths = [a["authority"] for a in mine if not a["authority"].get("error")]
+    return {
+        "agents": [
+            {"agent_id": a["agent_id"], "name": a["name"], "team": a["team"],
+             "autonomy": a["authority"].get("autonomy", a["autonomy"]),
+             "effective": a["authority"].get("effective", []),
+             "deny": a["authority"].get("deny", []),
+             "hitl_require_on": a["authority"].get("hitl_require_on", []),
+             "amount_threshold_krw": a["authority"].get("amount_threshold_krw"),
+             "budget": a["authority"].get("budget", {}),
+             "model_policy": a["authority"].get("model_policy", ""),
+             "sources": a["authority"].get("sources", []),
+             "works": a["authority"].get("works", []),
+             "layers": a["authority"].get("layers", []),
+             "error": a["authority"].get("error", "")}
+            for a in mine
+        ],
+        # 층 전체가 쓸 수 있는 도구 = 합집합. 못 쓰는 것 = 전원 공통 deny.
+        "effective_union": sorted({t for x in auths for t in x.get("effective", [])}),
+        "deny_common": sorted(set.intersection(
+            *[set(x.get("deny", [])) for x in auths]) if auths else set()),
+        "work_domains": sorted({w for t in teams for w in t.get("work_domains", [])}),
+        "max_sensitivity": max((t.get("max_sensitivity", "") for t in teams), default=""),
     }
 
 

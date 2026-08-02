@@ -154,6 +154,61 @@ def test_floors_only_show_sectors_the_division_actually_uses(state):
     assert [g["short"] for g in fp["gates"]] == ["pipe"]
 
 
+AUTH_FIELDS = {"allow", "deny", "effective", "declared", "autonomy", "hitl_require_on",
+               "budget", "model_policy", "sources", "layers", "works", "role"}
+
+
+def test_authority_is_the_compiled_gate_not_prose(state, root):
+    """권한 표시는 **컴파일된 실효 경계**여야 한다 — 문서에서 유추하면 아무도 안 본다."""
+    from dawn_core import Registry
+    from dawn_core.control_plane import compile_agent
+
+    reg = Registry.load(root)
+    for a in state["agents"]:
+        au = a["authority"]
+        assert not au.get("error"), f"{a['agent_id']} 권한 컴파일 실패: {au.get('error')}"
+        assert set(au) >= AUTH_FIELDS, f"빠진 필드: {sorted(AUTH_FIELDS - set(au))}"
+        want = compile_agent(reg, a["agent_id"])
+        gate = want.gate.to_dict(want.declared_tools)
+        assert au["effective"] == gate["tools"]["effective"]
+        assert au["deny"] == gate["tools"]["deny_patterns"]
+        assert au["autonomy"] == gate["autonomy"]
+        # L1~L4 가 다 있어야 통제 평면이 온전히 겹쳐진 것이다 (L3 은 수행 업무 수만큼)
+        levels = [ly["level"] for ly in au["layers"]]
+        assert au["works"], f"{a['agent_id']} 에 L3 업무가 없다"
+        assert levels == ["L1", "L2"] + ["L3"] * len(au["works"]) + ["L4"], \
+            f"{a['agent_id']} 계층: {levels}"
+        # 실효 도구는 allow 안 · deny 밖이어야 한다 (단조 축소의 결과)
+        assert set(au["effective"]) <= set(au["declared"])
+
+
+def test_floor_work_counts_come_from_telemetry(state):
+    """층의 업무 집계가 점유(=스팬)와 어긋나면 화면 숫자를 믿을 수 없다."""
+    for f in state["floorplan"]["floors"]:
+        ids = set(f["agents"])
+        calls = sum(1 for s in state["occupancy"] if s["agent_id"] in ids and s["tool"])
+        assert sum(t["calls"] for t in f["work"]["tools"]) == calls, f["name"]
+        for t in f["work"]["tools"]:
+            assert sum(t["gate"].values()) <= t["calls"]
+        # 차단 목록과 게이트 판정이 어긋나면 둘 중 하나는 거짓이다
+        blocked_by_gate = {t["tool"] for t in f["work"]["tools"] if t["gate"].get("block")}
+        assert set(f["work"]["blocked"]) == blocked_by_gate, f["name"]
+        # 권한 카드는 그 층 인원 수와 같아야 한다 — 빠지면 무권한처럼 보인다
+        assert {x["agent_id"] for x in f["authority"]["agents"]} == ids, f["name"]
+
+
+def test_blocked_tools_are_actually_denied_in_the_gate(state):
+    """게이트가 막은 도구는 권한에도 없어야 한다 — 아니면 통제 평면이 새는 것이다."""
+    import fnmatch
+
+    for f in state["floorplan"]["floors"]:
+        for tool in f["work"]["blocked"]:
+            for a in f["authority"]["agents"]:
+                assert tool not in a["effective"], f"{a['agent_id']} 는 {tool} 이 실효 도구인데 차단됐다"
+                assert any(fnmatch.fnmatchcase(tool, p) for p in a["deny"]), \
+                    f"{tool} 이 {a['agent_id']} 의 deny 패턴에 없다"
+
+
 def test_uniform_and_face_are_deterministic_encodings(html):
     """같은 에이전트는 늘 같은 얼굴이어야 한다 — 난수를 쓰면 신원 표시가 아니다."""
     assert "function hash32" in html, "id → 외모 결정론 해시가 없다"
@@ -271,6 +326,23 @@ def test_agents_walk_into_the_sector_and_idle_ones_do_not_twitch(headless):
     assert w["inSector"], f"{w['zone']} 섹터 안으로 들어가지 못했다"
     assert w["awayFromDesk"] > 1, "근무 자리가 자기 자리와 같으면 '섹터 진입'이 아니다"
     assert w["idleDrift"] == 0, "대기 중인 에이전트가 흔들렸다 — 장식 애니메이션이다"
+
+
+def test_floor_view_draws_only_that_floor(headless, state):
+    """층을 고르면 그 층만 나와야 한다 — 흐리게라도 남아 있으면 클릭·판독을 방해한다."""
+    lv = headless["levels"]
+    assert len(lv["building"]) == len(state["floorplan"]["floors"]), "빌딩 뷰가 전 층을 안 그린다"
+    assert len(set(lv["floor"])) == 1, f"층 뷰가 {sorted(set(lv['floor']))} 를 그린다"
+    assert len(set(lv["desk"])) == 1, "데스크 뷰도 그 층만 배경으로 써야 한다"
+    assert headless["views"]["floor"] < headless["views"]["building"], \
+        "층 하나가 사옥 전체보다 무겁다면 다른 층까지 그리고 있는 것이다"
+
+
+def test_floor_panel_shows_work_and_authority(headless):
+    """층 상세는 '무엇이 돌았나'와 '무엇을 할 수 있나'를 같이 보여줘야 한다."""
+    for kind, got in headless["panel"].items():
+        assert got["len"] > 1500, f"{kind} 선택 시 상세가 거의 비었다"
+        assert len(got["has"]) == 4, f"{kind}: 빠진 절 — {got['has']}"
 
 
 def test_roster_and_hit_targets_exist(headless, state):

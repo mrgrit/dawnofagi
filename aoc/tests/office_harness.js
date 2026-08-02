@@ -185,9 +185,15 @@ function placementAt(t) {
 }
 
 function runChecks() {
-  var out = { views: {}, placements: {}, walk: null, roster: 0, calls: null, errors: [] };
+  var out = { views: {}, levels: {}, placements: {}, walk: null, roster: 0,
+              panel: {}, calls: null, errors: [] };
   try {
     var w = S.state.window;
+
+    // 층을 몇 개나 그리는지 센다 — "그 층만"이 지켜지는지는 이걸로만 증명된다
+    var seen = [];
+    var realDrawLevel = drawLevel;
+    drawLevel = function (lv, alpha) { seen.push(lv.level); return realDrawLevel(lv, alpha); };
 
     // 1. 세 뷰가 전부 그려진다 (죽지 않는다)
     ["building", "floor", "desk"].forEach(function (v) {
@@ -195,10 +201,32 @@ function runChecks() {
       S.div = S.state.floorplan.floors[0].division_id;
       S.agent = S.state.agents[0].agent_id;
       S.spans = TRACE;
+      S.sel = { kind: "floor", id: S.div };
+      if (v === "building") fitCam(); else focusLevel(levelByDiv(S.div));
       var before = CALLS.fillRect + CALLS.poly + CALLS.text;
+      seen = [];
       draw();
       out.views[v] = CALLS.fillRect + CALLS.poly + CALLS.text - before;
+      out.levels[v] = seen.slice();
     });
+    drawLevel = realDrawLevel;
+
+    // 2b. 층 상세 패널 — 업무·권한이 실제로 붙었나
+    S.view = "floor"; S.div = S.state.floorplan.floors[0].division_id;
+    ["floor", "sector", "team", "lounge"].forEach(function (kind) {
+      var f = S.state.floorplan.floors.find(function (x) { return x.division_id === S.div; });
+      var id = kind === "sector" ? (f.sectors[0] || {}).short
+             : kind === "team" ? ((S.state.divisions.find(function (d) {
+                 return d.division_id === S.div; }) || { teams: [] }).teams[0] || {}).team_id
+             : S.div;
+      S.sel = { kind: kind, id: id };
+      draw();
+      var html = DOM.side.innerHTML;
+      out.panel[kind] = { len: html.length, has: ["업무 — 실제로 돌아간 것",
+        "권한 — 통제 평면이 정한 실효 경계", "쓸 수 있는 도구", "막힌 도구"]
+        .filter(function (s) { return html.indexOf(s) >= 0; }) };
+    });
+    S.sel = { kind: "", id: "" };
     S.view = "building";
 
     // 2. 배치 — 기록 구간의 여러 시점

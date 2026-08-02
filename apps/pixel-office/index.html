@@ -66,6 +66,28 @@
   .who .sub{color:var(--dim);font-size:11px}
   .who .at{font-size:11px}
 
+  .card{border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin:6px 0;
+    background:var(--panel2)}
+  .card.on{border-color:var(--acc)}
+  .card h3{margin:0 0 3px;font-size:12px;color:var(--ink);font-weight:normal}
+  .card .sub{color:var(--dim);font-size:11px}
+  .tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:3px}
+  .tbl th{text-align:left;color:var(--dim);font-weight:normal;padding:2px 3px;
+    border-bottom:1px solid var(--line)}
+  .tbl td{padding:2px 3px;border-bottom:1px solid #18222c;vertical-align:top}
+  .tbl td.n{text-align:right;color:var(--dim)}
+  .tbl tr.hot td{background:#1b1416}
+  .g-block{color:var(--crit)} .g-hitl{color:var(--warn)} .g-log{color:var(--acc)}
+  .lead{color:var(--dim);font-size:11px;margin:2px 0 5px}
+  details{margin:3px 0}
+  details summary{cursor:pointer;color:var(--acc);font-size:11px;outline:none;
+    list-style:none;padding:1px 0}
+  details summary::-webkit-details-marker{display:none}
+  details summary:before{content:"▸ "}
+  details[open] summary:before{content:"▾ "}
+  .mono{font-size:11px;color:#9fb0c2;word-break:break-all}
+  .jump{cursor:pointer;color:var(--acc)}
+
   footer{border-top:1px solid var(--line);background:var(--panel);padding:6px 14px;
     display:flex;align-items:center;gap:9px}
   footer input[type=range]{flex:1;accent-color:var(--acc);min-width:80px}
@@ -147,7 +169,10 @@
 /* 격자·층 치수. STEP 은 층 하나의 아이소 높이((Δx+Δy)·TH/2)보다 커야 한다 —
    작으면 위층이 아래층 뒷부분을 덮어 방이 사라진다. */
 const G = { TW:44, TH:8, SW:5.2, SD:5, COR:1.8, GAP:1.2, TEAM:3, TEAMD:3.4, TROW:4,
-            LOUNGE:6.5, CORE:2.4, STEP:206, WALL:34, SPEED:26 };
+            LOUNGE:6.5, CORE:2.4, STEP:206, WALL:34, SPEED:26, THF:20 };
+/* 빌딩 뷰는 층을 쌓아야 하니 납작하게 본다(TH). 한 층만 볼 땐 쌓을 게 없으니
+   카메라를 세워 방이 크게 보이게 한다(THF). 격자 좌표는 그대로다. */
+const thNow = () => S.view === "building" ? G.TH : G.THF;
 /* 잔글씨는 줌이 어느 정도 들어와야 그린다 — 전경에서 다 그리면 글자끼리 겹쳐
    아무것도 안 읽힌다. 빌딩 뷰는 '누가 어디 있나', 층 뷰는 '무엇이 있나'. */
 const detail = () => S.cam.z >= 0.7;
@@ -178,6 +203,7 @@ const SPEED_NAME = ["느리게", "보통", "빠르게", "아주 빠르게"];
 /* ── 런타임 홀더 — 비어서 시작한다 ────────────────────────────────────── */
 
 const S = { state:null, view:"building", div:null, agent:null, plan:null, pos:{},
+            sel:{kind:"", id:""},
             clock:0, playing:false, speed:1, ev:[], ei:0, spans:[], hit:[], hover:null, tip:null,
             cam:{x:0,y:0,z:1}, drag:null, raf:0, last:0, moving:false };
 
@@ -388,9 +414,9 @@ function fit(){
 
 /* 격자 → 화면. 카메라를 여기서 적용한다 → 모든 좌표가 곧 화면 좌표다(히트 판정 단순). */
 function P(gx, gy, level, lift){
-  const z = S.cam.z;
+  const z = S.cam.z, th = thNow();
   const wx = (gx-gy)*G.TW/2;
-  const wy = (gx+gy)*G.TH/2 - level*G.STEP - (lift||0);
+  const wy = (gx+gy)*th/2 - level*G.STEP - (lift||0);
   return { x: wx*z + S.cam.x, y: wy*z + S.cam.y };
 }
 
@@ -585,7 +611,8 @@ function drawLevel(lv, alpha){
         10.5*Math.max(.8,S.cam.z), "left");
 
   S.hit.push({ poly:slab(lv.x0, lv.y0, w, d, lv.level, 0, null, null),
-    go:()=>{ S.view="floor"; S.div=lv.f.division_id; S.agent=null; focusLevel(lv.level); draw(); },
+    go:()=>{ S.view="floor"; S.div=lv.f.division_id; S.agent=null;
+             S.sel = { kind:"floor", id:lv.f.division_id }; focusLevel(lv.level); draw(); },
     tip:()=>"<b>" + esc(lv.f.name) + "</b><br>run " + lv.f.runs + " · 스텝 " + lv.f.activity +
             "<br><i>클릭하면 이 층으로</i>" });
   ctx.globalAlpha = 1;
@@ -625,8 +652,9 @@ function drawSectors(lv){
     });
 
     if(i < lv.sectors.length-1) drawGate(lv, sc);
-    S.hit.push({ poly:pts, go:()=>{ S.view="floor"; S.div=lv.f.division_id;
-                   focusLevel(lv.level); draw(); },
+    S.hit.push({ poly:pts, go:()=>{
+        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); }
+        S.sel = { kind:"sector", id:z.short }; draw(); },
       tip:()=>"<b>" + esc(z.pixel_room) + "</b> " + esc(z.short) + "<br>" +
               esc(z.sensitivity) + " · " + esc(z.security_level) + " · " + esc(z.cidr) +
               "<br><i>자산 " + z.assets.length + " · 이 층에서 진입 " + z.visits + "회</i>" });
@@ -651,8 +679,10 @@ function drawTeams(lv){
       if(live) label("run " + t.runs, P(is.x+is.w/2, is.y+is.d-0.4, lv.level, -6),
                      "#2ab7a9", 9*S.cam.z);
     }
-    S.hit.push({ poly:slab(is.x-0.15, is.y, is.w+0.3, is.d-0.4, lv.level, 0.4, null, null),
-      go:()=>{ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); draw(); },
+    S.hit.push({ poly:slab(is.x-0.2, is.y, is.w+0.4, is.d-0.4, lv.level, 0.45, null, null),
+      go:()=>{
+        if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); }
+        S.sel = { kind:"team", id:t.team_id }; draw(); },
       tip:()=>"<b>" + esc(t.name) + "</b> " + esc(t.team_id) + "<br>" +
               esc(t.eg_org) + " · zone:" + esc(t.zone) +
               "<br><i>에이전트 " + t.agents.length + " · run " + t.runs +
@@ -691,7 +721,9 @@ function drawLounge(lv){
   label(S.plan.info.name, P(lg.x+lg.w/2, lg.y-0.22, lv.level, 30),
         "#9fb0c2", 10.5*Math.max(.85,S.cam.z), "center", "bold");
   S.hit.push({ poly:slab(lg.x, lg.y, lg.w, lg.d, lv.level, 0.5, null, null),
-    go:()=>{},
+    go:()=>{
+      if(S.view === "building"){ S.view="floor"; S.div=lv.f.division_id; focusLevel(lv.level); }
+      S.sel = { kind:"lounge", id:lv.f.division_id }; draw(); },
     tip:()=>"<b>" + esc(S.plan.info.name) + "</b><br><i>" + esc(S.plan.info.note) + "</i>" });
 }
 
@@ -772,16 +804,58 @@ function drawBuilding(w, h){
   void w; void h;
 }
 
-/* ── 뷰 2: 플로어 (한 층만 밝게 — 같은 렌더러, 카메라만 다르다) ───────── */
+/* ── 뷰 2: 플로어 (**그 층만**. 다른 층은 아예 그리지 않는다) ────────── */
 
 function drawFloor(w, h){
-  const lvs = S.plan.levels, focus = levelByDiv(S.div);
-  for(let i=lvs.length-1; i>=0; i--){
-    const a = lvs[i].level === focus ? 1 : 0.13;
-    drawLevel(lvs[i], a);
-    drawPeople(lvs[i], a);
+  const lv = S.plan.levels[levelByDiv(S.div)];
+  if(!lv) return;
+  drawLevel(lv);
+  drawPeople(lv);
+
+  // 선택한 방·팀을 캔버스에서도 표시한다 — 오른쪽 상세와 눈이 맞아야 한다
+  if(S.sel.kind === "sector"){
+    const sc = lv.sectors.find(s => s.z.short === S.sel.id);
+    if(sc) poly(slab(sc.x-0.25, sc.y-0.25, sc.w+0.5, sc.d+0.5, lv.level, 0.9, null, null),
+                null, "#2ab7a9", 2);
+  } else if(S.sel.kind === "team"){
+    const is = lv.teams.find(t => t.t.team_id === S.sel.id);
+    if(is) poly(slab(is.x-0.35, is.y-0.15, is.w+0.7, is.d-0.1, lv.level, 0.8, null, null),
+                null, "#2ab7a9", 2);
   }
-  void w; void h;
+
+  floorHud(lv, w);
+
+  const other = S.plan.levels.filter(x => x !== lv).map(x => x.f.name).join(" · ");
+  label("다른 층: " + other + "  —  ← 위로(Esc) 로 사옥 전체",
+        {x:14, y:h-14}, "#4a5967", 11, "left");
+}
+
+/* 층 머리말 — 업무·권한 요약. 오른쪽 상세를 읽기 전에 눈에 들어와야 한다. */
+function floorHud(lv, w){
+  const f = S.state.floorplan.floors[lv.level], wk = f.work, au = f.authority;
+  const bx = 14, by = 12, bw = Math.min(560, w-28);
+  ctx.fillStyle = "rgba(13,20,27,.9)"; ctx.fillRect(bx, by, bw, 62);
+  ctx.strokeStyle = "#1e2a36"; ctx.lineWidth = 1;
+  ctx.strokeRect(bx+.5, by+.5, bw-1, 61);
+  ctx.fillStyle = f.color; ctx.fillRect(bx, by, 4, 62);
+
+  label(f.name + "  F" + (lv.level+1), {x:bx+14, y:by+16}, "#d6e2f0", 13, "left", "bold");
+  label("업무  run " + wk.runs + " · 완료 " + wk.complete + " · 도구 " + wk.tools.length +
+        "종 · 토큰 " + wk.tokens.toLocaleString(), {x:bx+14, y:by+34}, "#9fb0c2", 11, "left");
+
+  let x = bx+14;                                     // 게이트 판정 — 색이 곧 등급이다
+  ["log_only", "require_hitl", "block"].forEach(k => {
+    const n = wk.gate_decisions[k] || 0;
+    if(!n) return;
+    const t = k + " " + n;
+    label(t, {x, y:by+51}, GATE_C[k], 11, "left");
+    x += t.length*7 + 12;
+  });
+  const perm = "권한  실효 " + au.effective_union.length + "종 · 공통 deny " +
+               au.deny_common.length + "종 · 최대 민감도 " + (au.max_sensitivity || "—");
+  label(perm, {x:Math.max(x+8, bx+230), y:by+51}, "#7d8fa3", 11, "left");
+  if(wk.blocked.length)
+    label("차단 " + wk.blocked.join(" "), {x:bx+bw-12, y:by+16}, GATE_C.block, 11, "right");
 }
 
 /* ── 뷰 3: 데스크 (에이전트 1명 — 실행 트레이스) ──────────────────────── */
@@ -874,7 +948,8 @@ function renderLegend(){
     el.innerHTML =
       "<b>집기</b> = EG 자산 · 색 = 비가역성 " + sw(IRR_C.irreversible) + "비가역" +
       sw(IRR_C.execute) + "실행" + sw(IRR_C.write) + "쓰기" + sw(IRR_C.read) + "읽기<br>" +
-      "<b>주황 문</b> = pipe(PEP) — 존을 넘을 때 지난다 &nbsp; <b>데스크</b> = 홈 섹터의 자기 자리";
+      "<b>주황 문</b> = pipe(PEP) — 존을 넘을 때 지난다 &nbsp; <b>데스크 섬</b> = 팀<br>" +
+      "<b>방·팀·휴게실을 클릭</b>하면 오른쪽에 업무·권한 상세가 나온다";
   } else {
     el.innerHTML =
       "<b>얼굴</b>(머리·안경·수염) = agent_id 고정 해시 → 늘 같은 사람 &nbsp;" +
@@ -885,12 +960,181 @@ function renderLegend(){
 
 /* ── 사이드 패널 ──────────────────────────────────────────────────────── */
 
+/* 층 상세 — 업무(실제로 돌아간 것)와 권한(할 수 있는 것)을 나란히 놓는다.
+   둘을 떼어 놓으면 "권한은 있는데 안 쓴다 / 쓰는데 아슬아슬하다"가 안 보인다. */
+
+const gcls = g => g === "block" ? "g-block" : g === "require_hitl" ? "g-hitl" : "g-log";
+const gateSpan = obj => Object.entries(obj || {}).sort()
+  .map(([k,v]) => '<span class="' + gcls(k) + '">' + esc(k) + " " + v + "</span>").join(" · ") || "—";
+const toolTags = (list, cls, max) => (list || []).length
+  ? (list.slice(0, max || 40).map(x => '<span class="tag ' + (cls||"") + '">' + esc(x) + "</span>").join("") +
+     ((list.length > (max||40)) ? '<span class="muted">+' + (list.length-(max||40)) + "</span>" : ""))
+  : '<span class="muted">없음</span>';
+
+function renderFloorDetail(){
+  const idx = levelByDiv(S.div);
+  const f = S.state.floorplan.floors[idx];
+  if(!f) return "";
+  const div = S.state.divisions.find(d => d.division_id === f.division_id) || { teams:[] };
+  const wk = f.work, au = f.authority;
+  let h = "";
+
+  h += "<h2>" + esc(f.name) + " · F" + (idx+1) + "</h2>";
+  h += kv({ "본부 존": "zone:" + f.zone, "섹터": f.sectors.map(s => s.short).join(" → "),
+            "팀": div.teams.length, "에이전트": f.agents.length,
+            "업무 도메인": au.work_domains.join(", ") || "—",
+            "최대 민감도": au.max_sensitivity || "—" });
+
+  // ── 선택한 대상 ─────────────────────────────────────────────────────
+  if(S.sel.kind === "sector"){
+    const z = f.sectors.find(s => s.short === S.sel.id);
+    if(z){
+      h += "<h2>섹터 " + esc(z.pixel_room) + "</h2>";
+      h += kv({ "존": z.short, "대역": z.cidr, "보안등급": z.security_level,
+                "민감도": z.sensitivity, "이 층에서 진입": z.visits + "회",
+                "담당 팀": (z.teams||[]).join(", ") || "—" });
+      h += '<div class="lead">방 안의 집기 = EG 자산. 색은 비가역성이다.</div>';
+      h += '<table class="tbl"><tr><th>자산</th><th>종류</th><th>비가역성</th></tr>' +
+        z.assets.map(as => "<tr><td>" + esc(as.name) + '</td><td class="muted">' +
+          esc(as.kind) + '</td><td style="color:' + (IRR_C[as.irreversibility]||"#5b6b7d") + '">' +
+          esc(as.irreversibility) + "</td></tr>").join("") + "</table>";
+      const been = S.state.occupancy.filter(s => s.zone === z.short && s.kind === "work" &&
+        f.agents.indexOf(s.agent_id) >= 0);
+      h += '<div class="lead">이 방에 들어온 기록 ' + been.length + "건</div>";
+      h += been.slice(-6).reverse().map(s =>
+        '<div class="row"><span class="jump" onclick="jumpTo(' + s.start_ns + ')">' +
+        hhms(s.start_ns) + "</span> " + esc(s.tool) +
+        ' <span class="' + gcls(s.gate) + '">' + esc(s.gate || "-") + "</span>" +
+        '<div class="muted" style="font-size:11px">' + esc(s.agent_id) + " · " +
+        esc(s.asset) + "</div></div>").join("") || '<div class="empty">기록 없음</div>';
+    }
+  }
+
+  if(S.sel.kind === "team"){
+    const t = div.teams.find(x => x.team_id === S.sel.id);
+    if(t){
+      h += "<h2>팀 " + esc(t.name) + "</h2>";
+      h += kv({ "ID": t.team_id, "EG 조직": t.eg_org, "존": t.zone,
+                "기본 페르소나": t.persona_default || "—",
+                "업무 도메인": t.work_domains.join(", ") || "—",
+                "최대 민감도": t.max_sensitivity || "—",
+                "에스컬레이션": t.escalation_to || "—",
+                "run / 스텝": t.runs + " / " + t.activity });
+      if(t.mission) h += '<div class="lead">' + esc(t.mission) + "</div>";
+      if(!t.agents.length) h += '<div class="empty">배치된 에이전트 없음 — 팀은 있으나 아직 사람이 없다</div>';
+    }
+  }
+
+  if(S.sel.kind === "lounge"){
+    const idle = S.state.agents.filter(a => a.division === f.division_id &&
+                                            !segAt(a.agent_id, S.clock));
+    h += "<h2>" + esc(S.plan.info.name) + "</h2>";
+    h += '<div class="lead">' + esc(S.plan.info.note) + "</div>";
+    h += idle.length ? idle.map(a => '<div class="row">' + esc(a.name) +
+      '<div class="muted" style="font-size:11px">마지막 run ' + a.runs +
+      "회 · 근무 " + (a.busy_ms/1000).toFixed(1) + "초</div></div>").join("")
+      : '<div class="empty">지금은 전원 근무 중</div>';
+  }
+
+  // ── 업무 ────────────────────────────────────────────────────────────
+  h += "<h2>업무 — 실제로 돌아간 것</h2>";
+  h += kv({ "run": wk.runs + " (완료 " + wk.complete + ")",
+            "토큰": wk.tokens.toLocaleString(),
+            "게이트 판정": "" });
+  h += '<div style="margin:-4px 0 6px">' + gateSpan(wk.gate_decisions) + "</div>";
+  if(wk.blocked.length)
+    h += '<div class="row"><span class="sev-critical">차단된 도구</span> ' +
+         toolTags(wk.blocked) + '<div class="muted" style="font-size:11px">' +
+         "게이트가 실제로 막았다 — 권한 밖을 시도한 흔적이다</div></div>";
+  h += '<table class="tbl"><tr><th>도구</th><th class="n">호출</th><th>행동</th>' +
+       "<th>게이트</th></tr>" +
+    (wk.tools.length ? wk.tools.map(t =>
+      '<tr class="' + (t.destructive ? "hot" : "") + '"><td>' + esc(t.tool) +
+      '<div class="muted">' + esc(t.zones.join(",")) + "</div></td>" +
+      '<td class="n">' + t.calls + "</td>" +
+      '<td style="color:' + (IRR_C[t.action] || "#9fb0c2") + '">' + esc(t.action || "?") +
+      (t.destructive ? '<br><span class="sev-critical">비가역</span>' : "") +
+      '<div class="muted">' + esc(t.risk) + "</div></td>" +
+      "<td>" + gateSpan(t.gate) + "</td></tr>").join("")
+      : '<tr><td colspan="4" class="muted">이 층에서 실행된 도구가 없다</td></tr>') + "</table>";
+  h += '<div class="lead">만진 자산</div>' + toolTags(wk.assets, "asset");
+  h += "<details><summary>최근 run " + wk.recent.length + "건</summary>" +
+    wk.recent.map(r => '<div class="row"><span class="jump" onclick="jumpTo(' +
+      r.started_ns + ')">' + hhms(r.started_ns) + "</span> " + esc(r.agent_id) +
+      (r.complete ? ' <span class="sev-low">완료</span>' : ' <span class="muted">미완</span>') +
+      (r.status !== "OK" ? ' <span class="sev-high">' + esc(r.status) + "</span>" : "") +
+      '<div class="muted" style="font-size:11px">' + esc(r.model || "모델 미기록") +
+      " · 스텝 " + r.steps + " · " + esc(r.tools.join(" → ") || "도구 없음") +
+      "</div></div>").join("") + "</details>";
+
+  // ── 권한 ────────────────────────────────────────────────────────────
+  h += "<h2>권한 — 통제 평면이 정한 실효 경계</h2>";
+  h += '<div class="lead">L1 COMPANY → L2 팀 → L3 업무 → L4 SOUL 을 겹쳐 병합한 값이다.' +
+       " 하위는 <b>좁힐 수만</b> 있다 (allow 교집합 · deny 합집합 · autonomy 최솟값).</div>";
+  h += kv({ "층 실효 도구": au.effective_union.length + "종",
+            "공통 deny": au.deny_common.length + "종" });
+  h += au.agents.length ? au.agents.map(x => {
+    const on = S.sel.kind === "team" && S.sel.id === x.team;
+    if(x.error) return '<div class="card"><h3>' + esc(x.name) + "</h3>" +
+      '<div class="sev-high">컴파일 실패: ' + esc(x.error) + "</div></div>";
+    const bud = x.budget || {};
+    return '<div class="card' + (on ? " on" : "") + '"><h3>' + esc(x.name) +
+      ' <span class="tag">' + esc(x.autonomy) + '</span><span class="tag">' +
+      esc(x.model_policy) + "</span></h3>" +
+      '<div class="sub">' + esc(x.team) + " · " + esc(x.agent_id) + "</div>" +
+      '<div class="lead">쓸 수 있는 도구 ' + x.effective.length + "종</div>" +
+      toolTags(x.effective, "asset", 12) +
+      '<div class="lead">막힌 도구 (deny — 문장으로 못 넘는다)</div>' +
+      toolTags(x.deny, "", 10) +
+      '<div class="lead">사람 승인이 필요한 조건 ' + x.hitl_require_on.length + "개" +
+      (x.amount_threshold_krw ? " · 금액 임계 " +
+        Number(x.amount_threshold_krw).toLocaleString() + "원" : "") + "</div>" +
+      toolTags(x.hitl_require_on, "pol", 12) +
+      "<details><summary>예산 · 경계 출처 · 통제 문서</summary>" +
+      kv({ "스텝": bud.max_steps, "도구 호출": bud.max_tool_calls,
+           "토큰": (bud.max_tokens||0).toLocaleString(),
+           "벽시계": (bud.max_wallclock_sec||0) + "초",
+           "좁힌 계층": x.sources.join(" → "),
+           "업무 SOP": x.works.join(", ") || "—" }) +
+      '<div class="mono">' + x.layers.map(l => esc(l.level) + " " + esc(l.label)).join("<br>") +
+      "</div></details></div>";
+  }).join("") : '<div class="empty">이 층에 배치된 에이전트가 없다 — 권한도 없다</div>';
+
+  // ── 이 층의 승인·케이스 ─────────────────────────────────────────────
+  h += "<h2>이 층 승인 대기 (" + wk.hitl.length + ")</h2>";
+  h += wk.hitl.length ? wk.hitl.map(x => '<div class="row">' + esc(x.skill) +
+    ' <span class="muted">' + esc(x.status) + "</span>" +
+    '<div class="muted" style="font-size:11px">' + esc(x.agent_id) + " · " +
+    esc((x.reasons||[])[0] || "") + "</div></div>").join("")
+    : '<div class="empty">대기 중 승인 없음</div>';
+
+  h += "<h2>이 층 케이스 (" + wk.cases.length + ")</h2>";
+  h += wk.cases.length ? wk.cases.map(c => '<div class="row"><span class="sev-' +
+    c.severity + '">●</span> ' + esc(c.title.slice(0,50)) +
+    '<div class="muted" style="font-size:11px">' + esc(c.axis) + " · 심각도 " +
+    esc(c.severity_label) + "/" + c.severity_score + " · 권고 " +
+    esc(c.recommended.join(", ") || "-") + "</div></div>").join("")
+    : '<div class="empty">열린 케이스 없음</div>';
+
+  return h;
+}
+
+window.jumpTo = ns => {
+  if(!S.ev.length) return;
+  let i = S.ev.findIndex(e => e >= ns);
+  gotoEvent(i < 0 ? S.ev.length-1 : i);
+};
+
 function renderSide(){
   const st = S.state;
   let html = "";
 
-  html += "<h2>인원 (" + st.agents.length + ")</h2>";
-  html += st.agents.map(a => {
+  if(S.view === "floor") html += renderFloorDetail();
+
+  const roster = S.view === "floor"
+    ? st.agents.filter(a => a.division === S.div) : st.agents;
+  html += "<h2>인원 (" + roster.length + ")</h2>";
+  html += roster.map(a => {
     const seg = segAt(a.agent_id, S.clock);
     const eff = EFFECT[a.effect] || EFFECT.idle;
     const where = seg
@@ -931,7 +1175,7 @@ function renderSide(){
     }
   }
 
-  html += "<h2>KPI (실측)</h2>";
+  html += "<h2>전사 KPI (실측)</h2>";
   html += st.kpis.map(k => {
     const ok = k.meets_target;
     const mark = ok === null ? '<span class="muted">표본 없음</span>'
@@ -988,6 +1232,7 @@ function renderSide(){
   // 명부 초상 — 사옥에 서 있는 사람과 **같은 인코딩**으로 그린다
   side.querySelectorAll(".who").forEach(el => {
     const a = st.agents.find(x => x.agent_id === el.dataset.agent);
+    if(!a) return;
     const c = el.querySelector("canvas"), g = c.getContext("2d");
     g.clearRect(0,0,44,50);
     person(g, a, 22, 46, 3.6, {flat:true});
@@ -1198,8 +1443,10 @@ cv.addEventListener("mouseleave", () => { tipEl.style.display = "none"; S.tip = 
 /* ── 네비게이션 ───────────────────────────────────────────────────────── */
 
 window.go = v => {
-  if(v === "building"){ S.view = "building"; S.agent = null; S.spans = []; fitCam(); }
-  if(v === "floor"){ S.view = "floor"; S.agent = null; S.spans = []; focusLevel(levelByDiv(S.div)); }
+  if(v === "building"){ S.view = "building"; S.agent = null; S.spans = [];
+                        S.sel = {kind:"", id:""}; fitCam(); }
+  if(v === "floor"){ S.view = "floor"; S.agent = null; S.spans = [];
+                     S.sel = {kind:"floor", id:S.div}; focusLevel(levelByDiv(S.div)); }
   draw();
 };
 document.getElementById("btn-back").onclick = () =>
