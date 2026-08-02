@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -483,3 +484,52 @@ def test_server_serves_trace_for_replay(server, root):
     assert spans and spans[0]["name"] == "invoke_agent", \
         "부모 스팬이 먼저 와야 리플레이가 트리로 열린다"
     assert [s["start_ns"] for s in spans] == sorted(s["start_ns"] for s in spans)
+
+
+def test_state_failure_answers_with_the_reason(root):
+    """상태 계산이 실패해도 **응답은 돌아와야** 한다.
+
+    실측: 사업 매니페스트에 `infra` 를 넣고 스키마도 고쳤는데, 옛 서버 프로세스가
+    검증기를 캐시하고 있어 `RegistryError` 가 났다. 예외를 그냥 올리니 연결이
+    끊겨(HTTP 000) 브라우저에는 빈 화면만 남았고 원인을 볼 방법이 없었다.
+
+    서브프로세스가 아니라 **같은 프로세스에서** 띄운다 — 실패를 심으려면
+    핸들러가 부르는 함수를 바꿔야 하는데, 그건 프로세스 경계를 못 넘는다.
+    """
+    import argparse
+    import threading
+
+    import dawn_aoc.cli as cli
+    import dawn_aoc.console as console_mod
+
+    real, armed = console_mod.write_state, threading.Event()
+
+    def maybe_boom(*a, **kw):
+        if armed.is_set():
+            raise RuntimeError("스키마(business) 위반")
+        return real(*a, **kw)
+
+    with socket.socket() as s:                      # 빈 포트 하나
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    console_mod.write_state = maybe_boom
+    try:
+        args = argparse.Namespace(host="127.0.0.1", port=port, root=str(root))
+        threading.Thread(target=cli.cmd_serve, args=(args,), daemon=True).start()
+        for _ in range(60):                         # 기동 대기
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2).read()
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError):
+                time.sleep(0.25)
+        else:
+            pytest.fail("서버가 뜨지 않았다")
+
+        armed.set()
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=15)
+        assert e.value.code == 500, "연결을 끊지 말고 이유를 응답해야 한다"
+        assert "스키마(business) 위반" in json.loads(e.value.read())["error"]
+    finally:
+        console_mod.write_state = real

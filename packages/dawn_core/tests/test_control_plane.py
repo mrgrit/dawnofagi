@@ -157,17 +157,20 @@ def test_formed_agent_compiles_through_the_control_plane(crew_root):
 
 def test_disband_leaves_no_trace(crew_root):
     """회수가 안 되면 레지스트리가 끝난 작업의 에이전트로 계속 부푼다."""
-    import subprocess
-
     from dawn_core import Registry
     from dawn_core.crew import disband, form, formed
 
+    # 편성이 건드리는 파일을 **직접** 떠 둔다. 예전엔 `git diff org/divisions/` 로
+    # 봤는데, 그건 이 테스트와 무관한 커밋 안 된 변경까지 실패로 읽는다(실측).
+    team_yaml = Registry.load(crew_root).teams["corp-cs"].dir / "team.yaml"
+    before = team_yaml.read_text(encoding="utf-8")
+
     form(crew_root, order_id=9901, members=[_member()], approved=True)
     assert formed(crew_root, order_id=9901)
+    assert team_yaml.read_text(encoding="utf-8") != before, "편성이 명부에 안 올랐다"
     assert disband(crew_root, order_id=9901) == ["wo9901-builder"]
     assert formed(crew_root, order_id=9901) == []
     Registry.load(crew_root).check_integrity()      # 양방향 참조가 깨지지 않았다
     # 사람이 쓴 매니페스트를 원본 그대로 돌려놔야 한다 (주석·포맷 포함)
-    diff = subprocess.run(["git", "diff", "--", "org/divisions/"], cwd=crew_root,
-                          capture_output=True, text=True).stdout
-    assert not diff.strip(), f"팀 매니페스트가 바뀐 채로 남았다:\n{diff[:400]}"
+    assert team_yaml.read_text(encoding="utf-8") == before, \
+        "팀 매니페스트가 바뀐 채로 남았다 (주석·포맷 포함해 원본이어야 한다)"

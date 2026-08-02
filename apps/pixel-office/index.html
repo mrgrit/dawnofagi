@@ -233,6 +233,13 @@ const hm = ns => new Date(ns/1e6).toTimeString().slice(0,5);
 
 async function load(){
   const r = await fetch("/api/state", {cache:"no-store"});
+  // 서버가 실패하면 그 이유를 그대로 올린다 — 응답 본문을 안 읽으면
+  // "Unexpected token '<'" 같은 파싱 에러만 남아 원인을 못 찾는다.
+  if(!r.ok){
+    let why = "HTTP " + r.status;
+    try{ const e = await r.json(); if(e && e.error) why += " — " + e.error; }catch(_){}
+    throw new Error(why);
+  }
   S.state = await r.json();
   S.plan = layout();
   buildEvents();
@@ -1941,7 +1948,10 @@ addEventListener("keydown", e => {
 load().catch(err => {
   side.innerHTML = "<h2>상태를 못 읽었다</h2>" +
     '<div class="empty">' + esc(err.message) + "</div>" +
-    '<div class="muted">dawn-aoc serve 로 띄웠는지 확인하라.</div>';
+    '<div class="muted">서버가 떠 있는데도 이 화면이면 <b>매니페스트·스키마를 고친 뒤 ' +
+    '재기동을 안 한 것</b>일 수 있다 (검증기는 프로세스마다 캐시된다).<br>' +
+    "<code>make office-stop &amp;&amp; make office-bg</code> · 로그: <code>var/aoc/serve.log</code></div>";
+  say("상태 API 실패 — " + err.message);
 });
 </script>
 </body>

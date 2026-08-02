@@ -287,7 +287,31 @@ def cmd_serve(args) -> int:
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=str(app_dir), **kw)
 
+        def _fail(self, exc: Exception):
+            """에러를 **응답으로** 돌려준다.
+
+            그냥 예외를 올리면 연결이 끊겨(HTTP 000) 브라우저는 "못 불러옴"만 보고
+            원인을 모른다. 실측: 스키마를 고친 뒤 옛 프로세스가 살아 있어
+            `RegistryError` 가 났는데 화면에는 아무 단서도 없었다.
+            """
+            import traceback
+
+            traceback.print_exc()
+            body = json.dumps({"error": f"{type(exc).__name__}: {exc}"},
+                              ensure_ascii=False).encode()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
+            try:
+                self._route()
+            except Exception as exc:                   # 콘솔은 죽지 않는다
+                self._fail(exc)
+
+        def _route(self):
             if self.path.startswith("/api/state"):
                 console_mod.write_state(root)          # 요청 시 갱신 (폴링 아님)
                 body = state_path.read_bytes()
