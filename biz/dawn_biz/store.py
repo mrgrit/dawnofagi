@@ -442,6 +442,26 @@ class BizStore:
         self.db.commit()
         _ = note
 
+    def work_order_approvals(self, wid: int) -> list[dict[str, Any]]:
+        r = self.work_order(wid)
+        if r is None:
+            raise KeyError(f"작업 지시 없음: {wid}")
+        try:
+            return json.loads(r["approvals"] or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    def append_work_order_approval(self, wid: int, entry: dict[str, Any],
+                                   *, status: str) -> None:
+        """결재 1건을 **덧붙인다.** 지우거나 고치지 않는다 — 감사 추적이다."""
+        cur = self.work_order_approvals(wid)
+        cur.append(entry)
+        self.db.execute(
+            "UPDATE work_order SET approvals=?,status=?,updated_at=? "
+            "WHERE id=? AND tenant=?",
+            (json.dumps(cur, ensure_ascii=False), status, _now(), wid, self.tenant))
+        self.db.commit()
+
     def customers(self, *, max_level: str = "L3", limit: int = 200) -> list[Row]:
         return self._rows("customer", max_level=max_level, limit=limit)
 

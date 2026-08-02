@@ -859,7 +859,8 @@ async def orders(request: Request) -> Response:
             division=r["division"], origin=r["origin"])
         mine = any(c["portal_user"] == user.username for c in chain)
         cards.append(div(
-            Safe(f'<b>#{r["id"]} {h(r["title"])}</b>')
+            Safe('<b>') + a(f'#{r["id"]} {r["title"]}', href=f'/orders/{r["id"]}')
+            + Safe('</b>')
             + Safe(" ") + span(r["status"], class_="tag")
             + (Safe(" ") + span("내 결재", class_="tag acc") if mine else Safe("")),
             small(f'{r["origin"]} · {r["business"]} · {r["division"]} · '
@@ -939,6 +940,114 @@ async def orders_post(request: Request) -> Response:
                           target=f"work_order:{wid}", ip=_ip(request),
                           business=business, tier=tier, division=division)
     return RedirectResponse("/orders", status_code=303)
+
+
+@require("portal.view")
+async def order_detail(request: Request) -> Response:
+    """작업 지시 1건 — 결재는 여기서 한다.
+
+    승인 권한은 능력(capability)이 아니라 **결재 라인**이 정한다. `hitl.approve` 가
+    있어도 이 작업의 차례가 아니면 못 누른다 — 결재 라인이 형식만 남지 않게.
+    """
+    from dawn_biz.store import BizStore
+    from dawn_core import workintake
+
+    user: User = request.state.user
+    root = _root(request)
+    wid = int(request.path_params["wid"])
+    store = BizStore(root)
+    r = store.work_order(wid)
+    if r is None:
+        return _shell(request, user, "작업 지시",
+                      join([h1("작업 지시"), p("없는 작업 지시다.", class_="empty")]),
+                      current="/orders", status=404)
+
+    chain = workintake.approval_chain(root, business=r["business"],
+                                      infra_tier=r["infra_tier"],
+                                      division=r["division"], origin=r["origin"])
+    decided = store.work_order_approvals(wid)
+    nxt = workintake.next_approver(chain, decided)
+    mine = bool(nxt and nxt["portal_user"] == user.username)
+
+    steps = []
+    for i, c in enumerate(chain):
+        done = next((d for d in decided if d.get("step") == i + 1), None)
+        mark = ("✔ 승인" if done["decision"] == "approved" else "✘ 반려") if done             else ("▶ 대기" if nxt and nxt["portal_user"] == c["portal_user"] else "· 예정")
+        steps.append(div(
+            Safe(f'<b>{i + 1}. {h(c["role"])}</b> ') + span(c["portal_user"], class_="tag")
+            + Safe(" ") + span(mark, class_="tag acc" if done else "tag"),
+            small(c["reason"] + (f' · {done["at"][:16].replace("T", " ")}' if done else ""),
+                  class_="dim"),
+            small(done.get("note", ""), class_="dim") if done and done.get("note") else None,
+            class_="card"))
+
+    form = None
+    if mine:
+        form = Safe('<form class="stack" method="post" '
+                    f'action="/orders/{wid}" style="margin-top:10px">') + join([
+            csrf_field(request),
+            Safe('<div><label for="d-n">의견</label>')
+            + textarea("note", "", id="d-n", rows="3") + Safe("</div>"),
+            Safe('<div><button type="submit" name="decision" value="approve">승인</button> '
+                 '<button type="submit" name="decision" value="reject">반려</button></div>'),
+        ]) + Safe("</form>")
+
+    body = join([
+        h1(f'#{r["id"]} {r["title"]}'),
+        div(join([
+            small(f'상태 {r["status"]} · {r["origin"]} · {r["business"]} · '
+                  f'{r["division"]} · 환경 {r["infra_tier"]}', class_="dim"),
+            small(f'요청자 {r["requester"] or "—"} ({r["requester_org"] or "—"}) · '
+                  f'{r["created_at"][:16].replace("T", " ")}', class_="dim"),
+            markdownish(r["body"]) if r["body"] else None,
+        ]), class_="card"),
+        h1("결재"),
+        join(steps) if steps else p("결재 라인이 없다 — division.yaml 에 lead 가 없다.",
+                                    class_="empty"),
+        form,
+        p(a("← 작업 지시", href="/orders")),
+    ])
+    return _shell(request, user, f'작업 지시 #{wid}', body, current="/orders")
+
+
+@require("portal.view")
+async def order_decide(request: Request) -> Response:
+    from dawn_biz.store import BizStore
+    from dawn_core import workintake
+
+    user: User = request.state.user
+    root = _root(request)
+    wid = int(request.path_params["wid"])
+    form = await request.form()
+    if not check_csrf(request, form):
+        return RedirectResponse(f"/orders/{wid}", status_code=303)
+
+    store = BizStore(root)
+    r = store.work_order(wid)
+    if r is None:
+        return RedirectResponse("/orders", status_code=303)
+    chain = workintake.approval_chain(root, business=r["business"],
+                                      infra_tier=r["infra_tier"],
+                                      division=r["division"], origin=r["origin"])
+    decided = store.work_order_approvals(wid)
+    approve = str(form.get("decision", "")) == "approve"
+    try:
+        entry = workintake.decide(chain, decided, actor=user.username, approve=approve,
+                                  note=str(form.get("note", "")), at=_now())
+    except (PermissionError, ValueError) as e:
+        return _shell(request, user, "결재 거부",
+                      join([h1("결재할 수 없다"), div(str(e), class_="flash bad"),
+                            p(a("← 돌아가기", href=f"/orders/{wid}"))]),
+                      current="/orders", status=403)
+
+    after = [*decided, entry]
+    status = "rejected" if not approve else (
+        "approved" if workintake.next_approver(chain, after) is None else "pending_approval")
+    store.append_work_order_approval(wid, entry, status=status)
+    _audit(request).write("portal.order.decide", actor=user.username,
+                          target=f"work_order:{wid}", ip=_ip(request),
+                          decision=entry["decision"], step=entry["step"], status=status)
+    return RedirectResponse(f"/orders/{wid}", status_code=303)
 
 
 @require("portal.view")
@@ -1416,6 +1525,8 @@ routes = [
     Route("/aoc", aoc_view),
     Route("/orders", orders, methods=["GET"]),
     Route("/orders", orders_post, methods=["POST"]),
+    Route("/orders/{wid:int}", order_detail, methods=["GET"]),
+    Route("/orders/{wid:int}", order_decide, methods=["POST"]),
     Route("/notices", notices, methods=["GET"]),
     Route("/notices", notices_post, methods=["POST"]),
     Route("/documents", documents, methods=["GET"]),

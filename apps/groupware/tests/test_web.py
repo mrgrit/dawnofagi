@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import warnings
 from dataclasses import dataclass, field
@@ -759,3 +760,102 @@ def test_json_error_page_has_no_stacktrace(portal):
     r = c.get("/no-such-page")
     assert r.status_code == 404
     assert "Traceback" not in r.text
+
+
+# ── 작업 지시 결재 (P7 DoD-2) ────────────────────────────────────────────
+
+
+@pytest.fixture
+def order(root):
+    """결재 라인이 2단계(본부장 → 대표이사)인 작업 지시 하나."""
+    from dawn_biz.store import BizStore
+
+    s = BizStore(root)
+    wid = s.add_work_order(
+        title="[테스트] 결재 흐름", body="본문", origin="external",
+        requester="테스트", business="ax-consulting", division="ax",
+        infra_tier="container")
+    s.set_work_order_status(wid, "pending_approval")
+    yield wid
+    s.db.execute("DELETE FROM work_order WHERE id=?", (wid,))
+    s.db.commit()
+
+
+def _order_csrf(c, wid):
+    r = c.get(f"/orders/{wid}")
+    assert r.status_code == 200
+    m = re.search(r'name="_csrf" value="([^"]+)"', r.text)
+    return m.group(1) if m else None
+
+
+def test_approval_chain_is_two_steps_for_external(portal, users, order):
+    if users.get("lead-ax") is None or users.get("ceo") is None:
+        pytest.skip("결재 계정 없음")
+    c, _ = _login(portal, "lead-ax")
+    body = c.get(f"/orders/{order}").text
+    assert "AX본부장" in body and "대표이사" in body, "결재 라인이 안 보인다"
+    assert "외부 고객 요청" in body, "대표이사가 붙은 이유가 안 보인다"
+
+
+def test_only_the_current_approver_sees_the_form(portal, users, order):
+    """능력(hitl.approve)이 있어도 **차례가 아니면** 결재할 수 없다.
+
+    결재 라인이 능력으로만 통제되면 아무 본부장이나 남의 본부 건을 승인할 수 있다.
+    """
+    if users.get("ceo") is None:
+        pytest.skip("ceo 계정 없음")
+    c, _ = _login(portal, "ceo")          # 2단계 결재자 — 아직 차례가 아니다
+    assert _order_csrf(c, order) is None, "차례가 아닌데 결재 폼이 보인다"
+
+
+def test_out_of_line_user_cannot_approve(portal, users, order):
+    from dawn_biz.store import BizStore
+
+    if users.get("intern") is None:
+        pytest.skip("intern 계정 없음")
+    c, _ = _login(portal, "intern")
+    r = c.post(f"/orders/{order}", data={"decision": "approve", "_csrf": "x"})
+    assert r.status_code in (303, 403)
+    assert BizStore(Paths().root).work_order_approvals(order) == [], "라인 밖 사람이 결재했다"
+
+
+def test_sequential_approval_completes_and_cannot_be_redecided(portal, users, order):
+    from dawn_biz.store import BizStore
+
+    if users.get("lead-ax") is None or users.get("ceo") is None:
+        pytest.skip("결재 계정 없음")
+    s = BizStore(Paths().root)
+
+    c, _ = _login(portal, "lead-ax")
+    tok = _order_csrf(c, order)
+    assert tok, "차례인 본부장에게 결재 폼이 없다"
+    c.post(f"/orders/{order}", data={"decision": "approve", "note": "승인", "_csrf": tok})
+    assert [a["decision"] for a in s.work_order_approvals(order)] == ["approved"]
+    assert s.work_order(order)["status"] == "pending_approval", "아직 대표이사가 남았다"
+
+    c, _ = _login(portal, "ceo")
+    tok = _order_csrf(c, order)
+    assert tok, "1단계가 끝났는데 대표이사에게 폼이 없다"
+    c.post(f"/orders/{order}", data={"decision": "approve", "_csrf": tok})
+    assert s.work_order(order)["status"] == "approved"
+    assert len(s.work_order_approvals(order)) == 2
+
+    # 재판정 불가 — 감사 추적
+    c, _ = _login(portal, "ceo")
+    assert _order_csrf(c, order) is None, "끝난 결재에 폼이 다시 보인다"
+
+
+def test_rejection_stops_the_chain(portal, users, order):
+    from dawn_biz.store import BizStore
+
+    if users.get("lead-ax") is None:
+        pytest.skip("lead-ax 계정 없음")
+    s = BizStore(Paths().root)
+    c, _ = _login(portal, "lead-ax")
+    tok = _order_csrf(c, order)
+    c.post(f"/orders/{order}", data={"decision": "reject", "note": "범위 밖", "_csrf": tok})
+    assert s.work_order(order)["status"] == "rejected"
+
+    c, _ = _login(portal, "ceo") if users.get("ceo") else (None, None)
+    if c is not None:
+        assert _order_csrf(c, order) is None, "반려됐는데 다음 결재자에게 폼이 보인다"

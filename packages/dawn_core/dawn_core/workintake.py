@@ -155,6 +155,41 @@ def approval_chain(root: Path, *, business: str, infra_tier: str,
     return chain
 
 
+def next_approver(chain: list[dict[str, str]],
+                  decided: list[dict[str, Any]]) -> dict[str, str] | None:
+    """지금 결재할 차례인 사람. 없으면 None (완료됐거나 반려됐다).
+
+    **순차다.** 1단계가 승인해야 2단계가 열린다 — 동시에 올리면 아래 단계가
+    위 단계를 우회할 수 있고, 그 순간 결재 라인은 형식만 남는다.
+    """
+    if any(d.get("decision") == "rejected" for d in decided):
+        return None
+    approved = [d for d in decided if d.get("decision") == "approved"]
+    return chain[len(approved)] if len(approved) < len(chain) else None
+
+
+def decide(chain: list[dict[str, str]], decided: list[dict[str, Any]], *,
+           actor: str, approve: bool, note: str = "", at: str = "") -> dict[str, Any]:
+    """결재 1건. 규칙을 어기면 예외 — 화면이 아니라 여기가 경계다.
+
+    Raises:
+        PermissionError: 차례가 아닌 사람 · 라인에 없는 사람
+        ValueError: 이미 끝난 결재 (재판정 불가 — 감사 추적)
+    """
+    nxt = next_approver(chain, decided)
+    if nxt is None:
+        raise ValueError("이미 끝난 결재다 — 재판정할 수 없다 (감사 추적)")
+    if actor != nxt["portal_user"]:
+        in_line = any(c["portal_user"] == actor for c in chain)
+        raise PermissionError(
+            f"지금 차례는 {nxt['role']}({nxt['portal_user']}) 다"
+            + ("" if in_line else " — 이 작업의 결재 라인에 없다")
+        )
+    return {"step": len(decided) + 1, "role": nxt["role"], "actor": actor,
+            "decision": "approved" if approve else "rejected",
+            "reason": nxt.get("reason", ""), "note": note[:500], "at": at}
+
+
 __all__ = [
     "INFRA_TIERS",
     "TIER_LABEL",
@@ -162,5 +197,7 @@ __all__ = [
     "BusinessChoice",
     "approval_chain",
     "choices",
+    "decide",
+    "next_approver",
     "validate",
 ]
