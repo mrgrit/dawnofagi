@@ -57,15 +57,34 @@ class KPI:
 
 def compute(runs, cases: list[Case], queue: ApprovalQueue,
             judges: dict[str, Any] | None = None) -> list[KPI]:
-    """실측치로 KPI 를 낸다. 표본이 없으면 0 이 아니라 n=0 으로 표시된다."""
+    """실측치로 KPI 를 낸다. 표본이 없으면 0 이 아니라 n=0 으로 표시된다.
+
+    **실업무(`purpose == "work"`) 만 센다.** 드릴·레드팀 run 은 일부러 차단되어
+    ④ eg_record 에 도달하지 않으므로, 같이 집계하면 "레드팀이 잘 막혔다"가
+    "일을 못 한다"로 뒤집혀 읽힌다 (실측: 미완 25건 중 21건이 레드팀 시도였다).
+    목적이 안 붙은 옛 트레이스(`unknown`)도 제외하고, 몇 건을 뺐는지 표시한다 —
+    조용히 빼면 그 자체가 거짓말이다.
+    """
     judges = judges or {}
-    n = len(runs)
     approvals = queue.list()
+
+    all_runs = list(runs)
+    runs = [r for r in all_runs if r.purpose == "work"]
+    excluded = len(all_runs) - len(runs)
+    n = len(runs)
+    drop_note = ""
+    if excluded:
+        kinds: dict[str, int] = {}
+        for r in all_runs:
+            if r.purpose != "work":
+                kinds[r.purpose] = kinds.get(r.purpose, 0) + 1
+        drop_note = "실업무 외 " + ", ".join(
+            f"{k} {v}" for k, v in sorted(kinds.items())) + " 제외"
 
     # 태스크 성공률
     complete = sum(1 for r in runs if r.complete)
     success = KPI("태스크 성공률", 100.0 * complete / n if n else 0.0, "%", "up",
-                  target=90.0, sample=n)
+                  target=90.0, sample=n, note=drop_note)
 
     # HITL 개입률 — 게이트 판정 중 HITL/차단이 걸린 비율
     total_gates = sum(sum(r.gate_decisions.values()) for r in runs)
@@ -74,13 +93,19 @@ def compute(runs, cases: list[Case], queue: ApprovalQueue,
         for r in runs
     )
     intervention = KPI("HITL 개입률", 100.0 * hitl_gates / total_gates if total_gates else 0.0,
-                       "%", "down", target=10.0, sample=total_gates)
+                       "%", "down", target=10.0, sample=total_gates, note=drop_note)
 
-    # 오탐율 — 사람이 거부한 승인 요청 = 올릴 필요 없던 것
-    decided = [a for a in approvals if a.status in ("approved", "denied")]
+    # 오탐율 — 사람이 거부한 승인 요청 = 올릴 필요 없던 것.
+    # 드릴이 올린 승인은 **일부러 거부하는 것**이라 같이 세면 오탐율이 부풀려진다.
+    work_traces = {r.trace_id for r in runs}
+    decided = [
+        a for a in approvals
+        if a.status in ("approved", "denied") and (not a.trace_id or a.trace_id in work_traces)
+    ]
     denied = sum(1 for a in decided if a.status == "denied")
     false_pos = KPI("오탐율(승인 거부)", 100.0 * denied / len(decided) if decided else 0.0,
-                    "%", "down", target=5.0, sample=len(decided))
+                    "%", "down", target=5.0, sample=len(decided),
+                    note="실업무 run 의 승인만" if excluded else "")
 
     # 할루시네이션율
     jr = [v for v in judges.values() if getattr(v, "verdict", "unknown") != "unknown"]
@@ -91,7 +116,7 @@ def compute(runs, cases: list[Case], queue: ApprovalQueue,
     # MTTD — 실행 시작에서 탐지까지. 우리 파이프라인은 배치라 run 종료 시점이 하한.
     mttd_vals = [r.duration_ms / 1000 for r in runs if any(c.trace_id == r.trace_id for c in cases)]
     mttd = KPI("MTTD(탐지까지)", sum(mttd_vals) / len(mttd_vals) if mttd_vals else 0.0,
-               "s", "down", target=300.0, sample=len(mttd_vals))
+               "s", "down", target=300.0, sample=len(mttd_vals), note=drop_note)
 
     # MTTR — 케이스 개시에서 대응 액션까지
     mttr_vals: list[float] = []
@@ -108,8 +133,10 @@ def compute(runs, cases: list[Case], queue: ApprovalQueue,
     mttr = KPI("MTTR(대응까지)", sum(mttr_vals) / len(mttr_vals) if mttr_vals else 0.0,
                "s", "down", target=1800.0, sample=len(mttr_vals))
 
+    # 탐지·대응 지표는 **드릴을 포함해서** 센다 — 드릴은 탐지력을 재는 정당한 표본이다.
     guard = KPI("가드레일 적중", float(sum(len(c.detections) for c in cases)), "건", "down",
-                sample=len(cases), note="많고 적음보다 미탐이 0 인지가 중요하다")
+                sample=len(cases),
+                note="드릴 포함 — 많고 적음보다 미탐이 0 인지가 중요하다")
 
     return [success, intervention, false_pos, halluc, mttd, mttr, guard]
 

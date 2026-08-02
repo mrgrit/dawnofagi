@@ -30,7 +30,7 @@ def main() -> int:
     rc = 0
     for agent_id, task, skills in DEMOS:
         w = Worker(agent_id)
-        run = w.run(task, touches_l3=True, extra_skills=skills)
+        run = w.run(task, touches_l3=True, extra_skills=skills, purpose="demo")
         print(
             f"  {agent_id:<22} complete={run.complete}  "
             f"{run.model_policy}→{run.provider}/{run.model}  "

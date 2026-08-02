@@ -51,6 +51,7 @@ def induce(root) -> tuple[Run, list[Detection]]:
         OP_INVOKE_AGENT,
         **{
             "gen_ai.operation.name": OP_INVOKE_AGENT,
+            "dawn.run.purpose": "drill",   # KPI 에서 빠진다 — 일부러 막히는 실행이다
             "gen_ai.agent.id": AGENT,
             "gen_ai.agent.name": w.registry.agents[AGENT].data["name"],
             "dawn.team": w.compiled.team_id,

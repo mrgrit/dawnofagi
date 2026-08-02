@@ -50,6 +50,9 @@ class Run:
     duration_ms: float = 0.0
     status: str = "OK"
     error: str = ""
+    # 이 실행이 무엇인가 — work(실업무) · drill · redteam · demo · unknown(태그 이전 트레이스).
+    # KPI 는 work 만 센다. 목적을 안 나누면 "레드팀이 잘 막혔다"가 "일을 못 한다"로 읽힌다.
+    purpose: str = "unknown"
 
     model: str = ""
     model_policy: str = ""
@@ -167,6 +170,7 @@ class TraceLake:
                 status=s.get("status", "OK"),
                 error=s.get("status_message", ""),
                 complete=bool(a.get("dawn.run.complete", False)),
+                purpose=str(a.get("dawn.run.purpose", "") or "unknown"),
             )
             r.spans.append(s)
 

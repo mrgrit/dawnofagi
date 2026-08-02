@@ -69,7 +69,8 @@ def sandbox(tmp_path):
 def mkrun(**kw) -> Run:
     base = {"trace_id": "t-test", "agent_id": CORP, "agent_name": "corp-admin-clerk-01",
             "team": "team-ga", "division": "div-corp", "zone": "user", "steps": 3,
-            "chat_calls": 1, "complete": True, "tools_used": ["eg.search", "eg.record"]}
+            "chat_calls": 1, "complete": True, "tools_used": ["eg.search", "eg.record"],
+            "purpose": "work"}
     base.update(kw)
     return Run(**base)
 
@@ -379,6 +380,29 @@ def test_kpi_success_rate_is_measured():
     assert kpis["태스크 성공률"].sample == 3
 
 
+def test_kpi_counts_only_real_work(eg):
+    """드릴·레드팀 run 은 일부러 막혀 ④ 에 도달하지 않는다. 같이 세면
+    "레드팀이 잘 막혔다"가 "일을 못 한다"로 뒤집혀 읽힌다 (실측 41.9% 중 21건).
+    """
+    import tempfile
+
+    from dawn_agents.hitl import ApprovalQueue
+
+    runs = [
+        mkrun(complete=True), mkrun(complete=True),        # 실업무 2건 (둘 다 성공)
+        mkrun(complete=False, purpose="redteam"),          # 차단된 공격 시뮬
+        mkrun(complete=False, purpose="drill"),            # 리허설
+        mkrun(complete=False, purpose="unknown"),          # 목적 태그 이전 트레이스
+    ]
+    with tempfile.TemporaryDirectory() as td:
+        kpis = {k.name: k for k in kpi_mod.compute(runs, [], ApprovalQueue(td), {})}
+    k = kpis["태스크 성공률"]
+    assert k.value == pytest.approx(100.0), "드릴·레드팀이 성공률을 끌어내렸다"
+    assert k.sample == 2, "실업무만 세야 한다"
+    # 뺐다는 사실이 화면에 보여야 한다 — 조용히 빼면 그 자체가 거짓말이다
+    assert "drill" in k.note and "redteam" in k.note and "unknown" in k.note, k.note
+
+
 def test_critical_incident_demotes_immediately(eg):
     r = mkrun(assets=["asset:fw-ips"],
               masking_violations=[{"kind": "주민등록번호", "sample": "x"}])
@@ -451,10 +475,14 @@ def test_state_json_is_serializable(repo_root):
 def test_timeline_replay_is_ordered(repo_root):
     """EU AI Act 12조 — 사후 재구성이 가능해야 한다."""
     lake = TraceLake(repo_root)
-    tids = lake.trace_ids()
-    if not tids:
-        pytest.skip("트레이스 없음")
-    spans = sorted(lake.spans(tids[0]), key=lambda s: s["start_ns"])
+    # 진행 중인 run 은 부모 스팬(invoke_agent)이 아직 안 쓰였다 — 에이전트가 도는
+    # 동안에도 관제는 돌아야 하므로, 끝난 트레이스를 골라 검증한다.
+    for tid in lake.trace_ids():
+        if any(s["name"] == "invoke_agent" for s in lake.spans(tid)):
+            break
+    else:
+        pytest.skip("완료된 트레이스 없음")
+    spans = sorted(lake.spans(tid), key=lambda s: s["start_ns"])
     assert spans
     assert [s["start_ns"] for s in spans] == sorted(s["start_ns"] for s in spans)
     assert spans[0]["name"] == "invoke_agent", "run 의 첫 스팬은 실행 개시여야 한다"

@@ -885,8 +885,9 @@ function floorHud(lv, w){
   ctx.fillStyle = f.color; ctx.fillRect(bx, by, 4, 62);
 
   label(f.name + "  F" + (lv.level+1), {x:bx+14, y:by+16}, "#d6e2f0", 13, "left", "bold");
-  label("업무  run " + wk.runs + " · 완료 " + wk.complete + " · 도구 " + wk.tools.length +
-        "종 · 토큰 " + wk.tokens.toLocaleString(), {x:bx+14, y:by+34}, "#9fb0c2", 11, "left");
+  label("업무  실업무 " + wk.work_runs + "/" + wk.runs + "run · 완료 " + wk.complete +
+        " · 도구 " + wk.tools.length + "종 · 토큰 " + wk.tokens.toLocaleString(),
+        {x:bx+14, y:by+34}, "#9fb0c2", 11, "left");
 
   let x = bx+14;                                     // 게이트 판정 — 색이 곧 등급이다
   ["log_only", "require_hitl", "block"].forEach(k => {
@@ -962,6 +963,11 @@ function assetPiece(as, gx, gy){
 }
 
 const KIND_LABEL = { system:"서버랙", data:"캐비닛", tool:"워크벤치", mcp:"터미널" };
+/* run 의 목적 — KPI 는 실업무만 센다. 드릴·레드팀은 일부러 막혀 ④ 에 도달하지
+   않으므로 같이 세면 "잘 막혔다"가 "일을 못 한다"로 뒤집혀 읽힌다. */
+const PURPOSE = { work:{ label:"실업무", c:"#22c55e" }, drill:{ label:"드릴", c:"#3b82f6" },
+                  redteam:{ label:"레드팀", c:"#ef4444" }, demo:{ label:"시연", c:"#a855f7" },
+                  unknown:{ label:"미태그", c:"#5d6d7e" } };
 
 function drawSectorRoom(w, h){
   const f = S.state.floorplan.floors[levelByDiv(S.div)];
@@ -1391,9 +1397,17 @@ function renderFloorDetail(){
 
   // ── 업무 ────────────────────────────────────────────────────────────
   h += "<h2>층 전체 업무 — 실제로 돌아간 것</h2>";
-  h += kv({ "run": wk.runs + " (완료 " + wk.complete + ")",
+  h += kv({ "run": wk.runs + "건 · 실업무 " + wk.work_runs,
+            "완료": wk.complete + "/" + wk.work_runs + " (실업무만)",
             "토큰": wk.tokens.toLocaleString(),
             "게이트 판정": "" });
+  h += '<div style="margin:-4px 0 4px">' + Object.entries(wk.purposes).map(([k,v]) => {
+    const p = PURPOSE[k] || PURPOSE.unknown;
+    return '<span class="tag" style="color:' + p.c + ';border-color:' + p.c + '33">' +
+           esc(p.label) + " " + v + "</span>";
+  }).join("") + "</div>" +
+  '<div class="lead">드릴·레드팀은 일부러 막혀 ④ 에 도달하지 않는다 — 완료율은 ' +
+  "실업무만 센다. 섞어 세면 \"잘 막혔다\"가 \"일을 못 한다\"로 읽힌다.</div>";
   h += '<div style="margin:-4px 0 6px">' + gateSpan(wk.gate_decisions) + "</div>";
   if(wk.blocked.length)
     h += '<div class="row"><span class="sev-critical">차단된 도구</span> ' +
@@ -1414,6 +1428,8 @@ function renderFloorDetail(){
   h += "<details><summary>최근 run " + wk.recent.length + "건</summary>" +
     wk.recent.map(r => '<div class="row"><span class="jump" onclick="jumpTo(' +
       r.started_ns + ')">' + hhms(r.started_ns) + "</span> " + esc(r.agent_id) +
+      ' <span style="color:' + (PURPOSE[r.purpose] || PURPOSE.unknown).c + '">' +
+      esc((PURPOSE[r.purpose] || PURPOSE.unknown).label) + "</span>" +
       (r.complete ? ' <span class="sev-low">완료</span>' : ' <span class="muted">미완</span>') +
       (r.status !== "OK" ? ' <span class="sev-high">' + esc(r.status) + "</span>" : "") +
       '<div class="muted" style="font-size:11px">' + esc(r.model || "모델 미기록") +

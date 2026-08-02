@@ -33,6 +33,10 @@ from .hitl import ApprovalQueue, auto_approve_enabled
 from .skills import Preview, SkillRegistry, SkillResult, build_default_registry
 from .telemetry import OP_CHAT, OP_EXECUTE_TOOL, OP_INVOKE_AGENT, Tracer, get_tracer
 
+# run 의 목적. **KPI 는 `work` 만 센다** — 드릴·레드팀은 일부러 차단되어 ④ 에
+# 도달하지 않으므로 같이 세면 성공률이 거짓이 된다.
+RUN_PURPOSES = {"work", "drill", "redteam", "demo"}
+
 
 class WorkerError(Exception):
     """워커 실행 실패."""
@@ -392,8 +396,19 @@ class Worker:
         *,
         touches_l3: bool | None = None,
         extra_skills: list[tuple[str, dict]] | None = None,
+        purpose: str = "work",
     ) -> WorkerRun:
-        """4단계 루프를 한 번 돈다."""
+        """4단계 루프를 한 번 돈다.
+
+        Args:
+            purpose: 이 실행이 **무엇인가** — `work`(실업무) · `drill`(리허설) ·
+                `redteam`(공격 시뮬) · `demo`(시연). KPI 는 실업무만 센다.
+                드릴·레드팀 run 은 일부러 차단되므로 ④ 에 도달하지 않고, 같이
+                집계하면 성공률이 "일을 못 한다"로 읽힌다 (실측 41.9% 중 21건이
+                레드팀이었다).
+        """
+        if purpose not in RUN_PURPOSES:
+            raise ValueError(f"알 수 없는 run 목적: {purpose} — {sorted(RUN_PURPOSES)}")
         wr = WorkerRun(agent_id=self.agent_id, task=task)
         self._step_n = 0
 
@@ -438,6 +453,7 @@ class Worker:
                 )
                 root.set(
                     **{
+                        "dawn.run.purpose": purpose,
                         "dawn.run.complete": wr.complete,
                         "dawn.run.tool_calls": wr.tool_calls,
                         "dawn.run.hitl": len(wr.hitl_requests),

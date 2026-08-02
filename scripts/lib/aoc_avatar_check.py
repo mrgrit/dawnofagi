@@ -38,6 +38,7 @@ def run_worker(root) -> str:
         "security/alert-triage 절차대로 판정하라.",
         touches_l3=True,
         extra_skills=[("sec.trace_query", {"limit": 3})],
+        purpose="drill",
     )
     print(f"  워커 실행   {AGENT}  complete={run.complete}  "
           f"{run.model_policy}→{run.provider}/{run.model}  "

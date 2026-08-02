@@ -203,7 +203,7 @@ def live_scan(root: Path, attacks: list[dict[str, Any]] | None = None,
         try:
             w = Worker(agent_id, registry=reg, eg_store=eg,
                        skills=build_registry(root, eg_store=eg))
-            run = w.run(a["payload"], touches_l3=False)
+            run = w.run(a["payload"], touches_l3=False, purpose="redteam")
         except Exception as exc:
             r.note = f"{type(exc).__name__}: {exc}"
             out.append(r)

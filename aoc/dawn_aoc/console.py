@@ -448,9 +448,16 @@ def _floor_work(did: str, mine: list[dict[str, Any]], occ: list[dict[str, Any]],
         for k, v in r.gate_decisions.items():
             decisions[k] = decisions.get(k, 0) + v
 
+    by_purpose: dict[str, int] = {}
+    for r in my_runs:
+        by_purpose[r.purpose] = by_purpose.get(r.purpose, 0) + 1
+    work = [r for r in my_runs if r.purpose == "work"]
     return {
         "runs": len(my_runs),
-        "complete": sum(1 for r in my_runs if r.complete),
+        "work_runs": len(work),
+        "purposes": dict(sorted(by_purpose.items())),
+        # 완료율은 **실업무만** — 드릴·레드팀은 일부러 막혀 ④ 에 도달하지 않는다
+        "complete": sum(1 for r in work if r.complete),
         "tokens": sum(r.tokens for r in my_runs),
         "tools": ranked,
         "gate_decisions": decisions,
@@ -461,6 +468,7 @@ def _floor_work(did: str, mine: list[dict[str, Any]], occ: list[dict[str, Any]],
         "recent": [
             {"trace_id": r.trace_id, "agent_id": r.agent_id, "started_ns": r.started_ns,
              "steps": r.steps, "status": r.status, "complete": r.complete,
+             "purpose": r.purpose,
              "tools": r.tool_sequence[:8], "model": r.model,
              "max_severity": r.max_severity}
             for r in my_runs[:8]

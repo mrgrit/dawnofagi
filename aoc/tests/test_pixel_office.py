@@ -302,7 +302,7 @@ def test_only_encoding_tables_are_hardcoded(html):
     consts = set(re.findall(r"const\s+([A-Z][A-Z0-9_]*)\s*=", body))
     assert consts <= {"G", "ZONE_TINT", "SEV_COLOR", "EFFECT", "HAT", "MODEL_C",
                       "IRR_C", "GATE_C", "KIND_FURN", "HAIR", "SKIN", "ACCENT",
-                      "KIND_LABEL", "SPEEDS", "SPEED_NAME", "S"}, \
+                      "KIND_LABEL", "PURPOSE", "SPEEDS", "SPEED_NAME", "S"}, \
         f"인코딩 표가 아닌 상수: {sorted(consts)}"
     # S 는 런타임 홀더다 — **비어서 시작해야** 한다. 초기값에 데이터가 있으면 픽스처다.
     m = re.search(r"const\s+S\s*=\s*\{(.*?)\};", body, re.S)
@@ -470,10 +470,15 @@ def test_server_serves_page_and_state(server):
 
 
 def test_server_serves_trace_for_replay(server, root):
-    tids = TraceLake(root).trace_ids()
-    if not tids:
-        pytest.skip("트레이스 없음")
+    # 진행 중인 run 은 invoke_agent(부모)가 아직 안 쓰였다 — 끝난 트레이스를 고른다.
+    lake = TraceLake(root)
+    for tid in lake.trace_ids():
+        if any(s["name"] == "invoke_agent" for s in lake.spans(tid)):
+            break
+    else:
+        pytest.skip("완료된 트레이스 없음")
     spans = json.loads(urllib.request.urlopen(
-        f"{server}/api/trace/{tids[0]}", timeout=10).read())
-    assert spans and spans[0]["name"] == "invoke_agent"
+        f"{server}/api/trace/{tid}", timeout=10).read())
+    assert spans and spans[0]["name"] == "invoke_agent", \
+        "부모 스팬이 먼저 와야 리플레이가 트리로 열린다"
     assert [s["start_ns"] for s in spans] == sorted(s["start_ns"] for s in spans)

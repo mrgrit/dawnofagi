@@ -84,6 +84,7 @@ def approval_drill(root: Path) -> int:
     wr = WorkerRun(agent_id=AGENT, task="[P4 드릴] 원장 기입 시도")
     with w.tracer.span(OP_INVOKE_AGENT, **{
         "gen_ai.operation.name": OP_INVOKE_AGENT, "gen_ai.agent.id": AGENT,
+        "dawn.run.purpose": "drill",   # KPI 에서 빠진다
         "gen_ai.agent.name": w.registry.agents[AGENT].data["name"],
         "dawn.team": w.compiled.team_id, "dawn.division": w.compiled.division_id,
         "dawn.eg_org": w.eg_org or "", "dawn.persona": w.compiled.persona,
