@@ -144,6 +144,7 @@ class Worker:
             autonomy=self.compiled.autonomy,
             org_id=self.eg_org or "",
             model_cost_tier=tier,
+            catalog=self.skills.catalog,
         )
         self.tracer = tracer or get_tracer(self.paths.root)
         self.queue = queue or ApprovalQueue(self.paths.root)
@@ -193,7 +194,15 @@ class Worker:
     def eg_search(self, run: WorkerRun, query: str, limit: int = 5) -> str:
         with self.tracer.span(
             OP_EXECUTE_TOOL,
-            **{"gen_ai.tool.name": "eg.search", "gen_ai.operation.name": OP_EXECUTE_TOOL},
+            **{
+                "gen_ai.tool.name": "eg.search",
+                "gen_ai.operation.name": OP_EXECUTE_TOOL,
+                # 만지는 자산은 **선언한다** (카탈로그가 권위). 다만 이 단계는 루프의
+                # 필수 단계라 액션 게이트를 지나지 않는다 — 그 사실도 같이 싣는다.
+                # 관제가 "존을 넘었다"와 "자기 자리에서 조회했다"를 구분해야 한다.
+                "dawn.assets": ",".join(self.skills.get("eg.search").touches),
+                "dawn.gate.evaluated": False,
+            },
         ) as sp:
             res = self.skills.run("eg.search", query=query, limit=limit)
             sp.set(**{"dawn.eg.hits": res.meta.get("hits", 0), "dawn.gate.decision": "log_only"})
@@ -225,6 +234,7 @@ class Worker:
                 "dawn.skill.risk": preview.risk,
                 "dawn.skill.destructive": preview.destructive,
                 "dawn.gate.decision": decision.decision,
+                "dawn.gate.evaluated": True,
                 "dawn.gate.reasons": "; ".join(decision.reasons),
                 "dawn.severity": decision.severity,
                 "dawn.assets": ",".join(decision.assets),
@@ -361,7 +371,12 @@ class Worker:
     def eg_record(self, run: WorkerRun, kind: str, summary: str, detail: str = "") -> None:
         with self.tracer.span(
             OP_EXECUTE_TOOL,
-            **{"gen_ai.tool.name": "eg.record", "gen_ai.operation.name": OP_EXECUTE_TOOL},
+            **{
+                "gen_ai.tool.name": "eg.record",
+                "gen_ai.operation.name": OP_EXECUTE_TOOL,
+                "dawn.assets": ",".join(self.skills.get("eg.record").touches),
+                "dawn.gate.evaluated": False,
+            },
         ) as sp:
             res = self.skills.run("eg.record", kind=kind, summary=summary, detail=detail)
             sp.set(

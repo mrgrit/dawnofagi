@@ -310,6 +310,29 @@ class ToolCatalog:
         bad = [t for t in tools if "." not in t or t.split(".", 1)[0] not in namespaces]
         if bad:
             raise GateError(f"{path}: 알 수 없는 네임스페이스의 도구 — {', '.join(sorted(bad))}")
+        # `touches` 는 **반드시 선언**한다. 빠뜨리면 심각도가 0(낮음)으로 계산돼
+        # 가장 위험한 도구가 가장 안전해 보인다. 자산이 없는 게 맞는 메타 도구는
+        # `touches: []` 로 **명시**한다 — 빠뜨림과 "없음"은 다른 사실이다.
+        no_touches = [t for t, v in tools.items() if "touches" not in (v or {})]
+        if no_touches:
+            raise GateError(
+                f"{path}: touches 미선언 — {', '.join(sorted(no_touches))}\n"
+                "  만지는 EG 자산을 적어라. 자산이 없는 게 맞으면 `touches: []` 로 명시한다."
+            )
+        no_desc = [t for t, v in tools.items() if not (v or {}).get("desc")]
+        if no_desc:
+            raise GateError(f"{path}: desc 없음 — {', '.join(sorted(no_desc))}")
+        # 루프 계측은 게이트를 우회한다 → 비가역 도구에는 절대 붙일 수 없다.
+        unsafe = [
+            t for t, v in tools.items()
+            if (v or {}).get("loop_instrumentation")
+            and ((v or {}).get("destructive") or (v or {}).get("risk") == "HIGH")
+        ]
+        if unsafe:
+            raise GateError(
+                f"{path}: 비가역·고위험 도구에 loop_instrumentation 이 붙었다 — "
+                f"{', '.join(sorted(unsafe))}. 게이트 우회는 계측에만 허용한다."
+            )
         return cls(namespaces=namespaces, tools=tools, source=path)
 
     def known(self, tool: str) -> bool:
@@ -327,3 +350,14 @@ class ToolCatalog:
 
     def risk(self, tool: str) -> str:
         return str(self.tools.get(tool, {}).get("risk", "MED"))
+
+    def loop_instrumentation(self, tool: str) -> bool:
+        """워커 루프의 필수 단계인가 — 게이트가 막으면 루프가 멈춘다."""
+        return bool(self.tools.get(tool, {}).get("loop_instrumentation"))
+
+    def touches(self, tool: str) -> list[str]:
+        """이 도구가 만지는 EG 자산. **카탈로그가 권위다** — 등록 코드가 아니라.
+
+        등록부가 빠뜨려도 여기서 채워지므로 같은 실수가 조용히 반복되지 않는다.
+        """
+        return list(self.tools.get(tool, {}).get("touches") or [])

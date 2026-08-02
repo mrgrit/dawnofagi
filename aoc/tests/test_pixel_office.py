@@ -121,6 +121,35 @@ def test_occupancy_is_one_row_per_span(state, root):
         assert s["kind"] in ("work", "desk")
 
 
+def test_room_entry_requires_passing_the_action_gate(state):
+    """존 경계는 문(pipe·PEP)이다 — 게이트를 지난 적이 없으면 문을 통과한 적도 없다.
+
+    루프 필수 단계(eg.*)는 자산을 선언하되 방에 들어가지 않는다. 그러지 않으면
+    run 마다 두 번씩 존을 왕복해 의미 있는 이동이 노이즈에 묻힌다.
+    """
+    occ = state["occupancy"]
+    for s in occ:
+        if s["kind"] == "work":
+            assert s["gated"], f"{s['tool']}: 게이트를 안 지났는데 방에 들어갔다"
+            assert not s["remote_zone"], "방에 들어갔으면 원격이 아니다"
+        if s["remote_zone"]:
+            assert not s["gated"], f"{s['tool']}: 게이트를 지났는데 원격으로 샜다"
+            assert s["kind"] == "desk"
+            assert s["asset"], "원격인데 만진 자산이 없다"
+
+
+def test_eg_lookups_declare_their_asset_but_stay_at_the_desk(state):
+    """EG 조회는 dmz 자산을 만진다 — 선언은 하되 캐릭터를 왕복시키지 않는다."""
+    eg = [s for s in state["occupancy"] if s["tool"].startswith("eg.")]
+    assert eg, "eg 스팬이 없으면 검증할 수 없다"
+    assert all(s["kind"] == "desk" for s in eg), "eg 조회로 방에 들어간 구간이 있다"
+    declared = [s for s in eg if s["asset"]]
+    assert declared, "eg 스팬이 자산을 하나도 선언하지 않는다 (구 트레이스만 있으면 이 검증이 무의미)"
+    for s in declared:
+        assert s["asset"] == "asset:eg-db", s["asset"]
+        assert s["remote_zone"], "자산을 선언했으면 원격 접근으로 남아야 한다"
+
+
 def test_work_segments_land_in_the_zone_that_owns_the_asset(state):
     """`work` 구간의 존은 EG `Asset -LOCATED_IN-> Zone` 이 정한 것과 같아야 한다."""
     owner = {a["id"]: z["short"] for z in state["zones"] for a in z["assets"]}

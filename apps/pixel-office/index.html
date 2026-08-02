@@ -762,12 +762,32 @@ function drawPeople(lv, alpha){
   here.forEach(({a,p}) => {
     const pt = P(p.gx, p.gy, p.level, 0.6);
     const s = 3.1 * S.cam.z;
+
+    // 원격 조회 — 자리에 앉은 채 다른 방의 자산을 만지는 중이다. 게이트를 지나지
+    // 않았으니 방으로 걸어가지 않는다. run 마다 두 번씩 일어나는 일이라 왕복시키면
+    // 의미 있는 존 이동이 묻힌다. 대신 선으로 "어디에 손이 닿아 있는지"만 보인다.
+    const seg0 = p.seg;
+    if(seg0 && seg0.remote_zone){
+      const sc = lv.sectors && lv.sectors.find(x => x.z.short === seg0.remote_zone);
+      if(sc){
+        const to = P(sc.x + sc.w/2, sc.y + sc.d - 0.6, lv.level, 6);
+        ctx.strokeStyle = "#4a8ba3"; ctx.lineWidth = Math.max(1, 1.2*S.cam.z);
+        ctx.globalAlpha = .55;
+        ctx.beginPath(); ctx.moveTo(pt.x, pt.y - 14*S.cam.z); ctx.lineTo(to.x, to.y); ctx.stroke();
+        ctx.globalAlpha = 1;
+        if(S.cam.z > 0.6)
+          label("원격 " + (seg0.tool || seg0.span),
+                { x:(pt.x+to.x)/2, y:(pt.y+to.y)/2 - 6 }, "#7ec8e3", 9.5*S.cam.z);
+      }
+    }
+
     person(ctx, a, pt.x, pt.y, s);
     if(S.cam.z > 0.55){
       label(a.name || a.agent_id, { x:pt.x, y:pt.y + 9*S.cam.z }, "#cfdcea", 10.5*S.cam.z);
       const seg = p.seg;
       const doing = seg ? (seg.kind === "work"
           ? (seg.tool || seg.span) + " → " + seg.zone
+          : seg.remote_zone ? (seg.tool || seg.span) + " ⇢ " + seg.remote_zone + " 원격"
           : (seg.span === "chat" ? "생각 중 (chat)" : (seg.tool || seg.span)))
         : "대기";
       label(doing, { x:pt.x, y:pt.y + 20*S.cam.z },
@@ -789,7 +809,9 @@ function agentTip(a, p){
           " · " + esc(eff.label) + "<br>";
   if(seg){
     s += "<i>" + esc(seg.span) + (seg.tool ? " " + esc(seg.tool) : "") + "</i><br>" +
-         (seg.asset ? esc(seg.asset) + " @ " : "") + esc(seg.zone) +
+         (seg.asset ? esc(seg.asset) + " @ " : "") +
+         (seg.remote_zone ? esc(seg.remote_zone) + " (자기 자리에서 원격 — 게이트 미통과)"
+                          : esc(seg.zone)) +
          (seg.gate ? " · gate=" + esc(seg.gate) : "") +
          "<br><i>" + hhms(seg.start_ns) + " → " + hhms(seg.end_ns) + "</i>";
   } else {
@@ -1263,6 +1285,7 @@ function renderFloorDetail(){
                 "민감도": z.sensitivity,
                 "방에 들어온 횟수": z.entries + "회",
                 "자기 자리 스팬": z.desk_spans + "건",
+                "원격 접근": z.remote + "건",
                 "상주 팀": (z.teams||[]).join(", ") || "없음",
                 "상주 에이전트": (z.homed||[]).join(", ") || "없음" });
       if(!z.used)
@@ -1280,8 +1303,13 @@ function renderFloorDetail(){
       h += toolTable(z.tools);
 
       h += '<div class="lead">자기 자리에서 부른 도구 — 이 존을 홈으로 두지만' +
-           " 자산은 안 건드린 스팬이다 (chat·eg 조회 등). 방에 들어온 게 아니다.</div>";
+           " 방에 들어온 건 아니다.</div>";
       h += toolTable(z.desk_tools);
+
+      h += '<div class="lead">원격 접근 ' + z.remote + "건 — 다른 자리에 앉은 채 " +
+           "이 방의 자산을 만졌다. 액션 게이트를 지나지 않는 루프 필수 단계다 " +
+           "(막으면 에이전트가 자기 작업을 기록하지 못한다).</div>";
+      h += toolTable(z.remote_tools);
 
       h += '<div class="lead">방에 들어온 사람</div>';
       h += z.visitors.length ? z.visitors.map(v => '<div class="row">' + esc(v.name) +
@@ -1348,7 +1376,8 @@ function renderFloorDetail(){
       (z.used ? "" : ' <span class="muted">미사용</span>') + "</h3>" +
       '<div class="sub">' + esc(z.sensitivity) + " · " + esc(z.cidr) +
       " · 자산 " + z.assets.length + " · 진입 " + z.entries + "회" +
-      (z.desk_spans ? " · 자기 자리 " + z.desk_spans : "") + "</div>" +
+      (z.desk_spans ? " · 자기 자리 " + z.desk_spans : "") +
+      (z.remote ? " · 원격 " + z.remote : "") + "</div>" +
       (z.works.length
         ? '<div style="margin-top:3px">' +
           z.works.map(w => '<span class="tag pol">' + esc(w) + "</span>").join("") + "</div>"

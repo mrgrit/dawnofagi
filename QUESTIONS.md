@@ -135,7 +135,7 @@ EG 노드 77→78, 엣지 148→150. `make eg-load && make eg-validate` 오류 0
 
 ---
 
-## Q7 — 자산 미선언 도구가 16/35 이고, 페일세이프에 구멍이 있다 (결정 필요)
+## Q7 — 자산 미선언 도구가 16/35 이고, 페일세이프에 구멍이 있다 (1~3 조치 완료 · 4 대기)
 
 > **정정.** 처음 이 항목을 적을 때 `sec.trace_query` 가 호출마다 게이트 판정이
 > 갈린다고 썼는데, 확인해 보니 **옛 트레이스였다**. 자산 없는 2건은 08-01 14:55·15:08,
@@ -219,3 +219,30 @@ sec.container_stop   HIGH  ['asset:fw-ips']    6  최고     block
 
 1~3 은 게이트 판정을 안 바꾼다(자산 선언이 늘어도 deny 는 그대로). **4 는 기존
 케이스 심각도와 KPI 를 재계산시킨다** — 그래서 여기서 멈추고 묻는다.
+
+### 조치 (1~3 완료)
+
+* `org/tools.yaml` 50개 도구 전부 `touches:` 선언. 메타 도구(`skill.*`)는 `touches: []` 로 명시.
+* `ToolCatalog.load` 가 `touches` 미선언·`desc` 없음을 **거부**한다 → `make check` 에서 잡힌다.
+* 스킬 등록 시 카탈로그의 touches 를 자동 적용 — 등록부가 빠뜨려도 채워진다.
+* 심각도 정상화: `sys.rm_rf_root`·`ctl.modify_gate` **0 → 6(최고)**. 자격증명 회수
+  문턱(`severity_score >= 6`)을 이제 넘는다.
+* 덤으로 발견: 16개 도구의 `desc` 가 `desc:""…""` 로 깨져 파싱 시 사라지고 있었다. 고쳤다.
+
+### 이 과정에서 깨진 불변식 하나와 그 처리
+
+`eg.record` 에 자산을 달자 `pol:autonomy-gate` 가 발동해 `require_hitl` 이 됐다
+(A1 조직 < dmz 자산 등급, action=write). 그러면 **에이전트가 자기 작업을 기록하지
+못해** "④ eg_record 를 마쳐야 완료"라는 루프 불변식이 깨진다
+(`test_loop_instrumentation_is_not_gated` 가 잡았다).
+
+암묵적으로 워커 코드가 게이트를 건너뛰던 것을 **카탈로그 선언으로 끌어올렸다**:
+
+```yaml
+eg.search: { ..., touches: [asset:eg-db], loop_instrumentation: true }
+```
+
+`loop_instrumentation` 이 붙은 도구는 판정이 `log_only` 로 강제된다. 다만 **자산·
+심각도·정책 판정은 그대로 기록**하고, 강제했다는 사실을 이유에 남긴다. 비가역·고위험
+도구에는 붙일 수 없다 (`ToolCatalog.load` 가 거부). 우회가 코드 깊숙이 숨어 있지 않고
+통제 평면 문서에 적혀 있게 됐다.

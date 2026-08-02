@@ -10,9 +10,14 @@
 **점유(occupancy)** — 에이전트가 언제 어느 섹터에 있었는지는 추측하지 않는다.
 스팬 하나가 곧 체류 구간 하나다:
 
-* `dawn.assets` 가 있는 스팬 → 그 자산이 `LOCATED_IN` 한 존이 있을 곳이다.
+* **방에 들어갔다 = 액션 게이트를 지난 자산 접촉** (`dawn.gate.evaluated`).
+  존 경계는 문(pipe·PEP)이고, 게이트를 지난 적이 없으면 문을 통과한 적도 없다.
   자산을 여럿 건드렸으면 **가장 깊은 존**(민감도 높은 쪽)에 있는 것으로 본다.
-* 자산이 없는 스팬(chat·eg.search) → 자기 자리(홈 존)에서 하는 일이다.
+* 게이트를 안 지난 스팬 → 자기 자리(홈 존). 워커 루프의 필수 단계(`eg.search`·
+  `eg.record`)가 여기다 — 막을 수 없는 단계라 게이트를 태우지 않는다. 만진 자산은
+  `remote_zone` 으로 남겨 "자기 자리에서 원격 조회"로 그린다. run 마다 두 번씩
+  일어나는 일이라 방을 왕복시키면 의미 있는 존 이동이 노이즈에 묻힌다.
+* 자산이 아예 없는 스팬(chat) → 자기 자리에서 생각하는 중이다.
 * **스팬이 없는 시각 = 대기실.** 일하지 않는 에이전트를 섹터에 세워 두면
   "지금 저기서 뭔가 하고 있다"는 거짓말이 된다.
 """
@@ -208,12 +213,21 @@ def _occupancy(runs, zones: list[dict[str, Any]],
             touched = [a for a in str(at.get("dawn.assets", "")).split(",") if a]
             in_zone = [asset_zone[a] for a in touched if a in asset_zone]
             zone = max(in_zone, key=lambda z: depth.get(z, (-1, -1))) if in_zone else ""
+            # **방에 들어간 것 = 액션 게이트를 지난 자산 접촉.** 문(pipe·PEP)을 통과한
+            # 적이 없는데 방 안에 세워 두면 거짓이다. 워커 루프의 필수 단계(eg.*)는
+            # 게이트를 지나지 않으므로 자기 자리에 남고, 만진 자산은 원격 조회로 남긴다.
+            ev = at.get("dawn.gate.evaluated")
+            gated = bool(at.get("dawn.skill.risk")) if ev is None else bool(ev)
+            entered = bool(zone) and gated
             start = int(s.get("start_ns", 0) or 0)
             segs.append({
                 "agent_id": r.agent_id,
                 "trace_id": r.trace_id,
-                "zone": zone or desk,
-                "kind": "work" if zone else "desk",   # desk = 자기 자리에서 생각·조회
+                "zone": zone if entered else desk,
+                "kind": "work" if entered else "desk",   # desk = 자기 자리
+                "gated": gated,
+                # 자기 자리에서 원격으로 만진 자산이 있는 존 (있으면 데스크→방 선을 긋는다)
+                "remote_zone": zone if (zone and not entered) else "",
                 "span": str(s.get("name", "")),
                 "tool": str(at.get("gen_ai.tool.name", "")),
                 "asset": next((a for a in touched if asset_zone.get(a) == zone), ""),
@@ -340,6 +354,8 @@ def _sector_work(did: str, zone: dict[str, Any], mine: list[dict[str, Any]],
     # 세면 "이 방에 42번 들어왔다"처럼 없던 일이 생긴다.
     entered = [s for s in segs if s["kind"] == "work"]
     at_desk = [s for s in segs if s["kind"] == "desk"]
+    # 자기 자리에서 이 방의 자산을 원격으로 만진 것 — 들어온 건 아니지만 접근은 했다
+    remote = [s for s in occ if s["remote_zone"] == short and s["agent_id"] in by_id]
 
     def _tools(rows):
         acc: dict[str, dict[str, Any]] = {}
@@ -371,10 +387,13 @@ def _sector_work(did: str, zone: dict[str, Any], mine: list[dict[str, Any]],
     assets = []
     for as_ in zone["assets"]:
         touched = [s for s in entered if s["asset"] == as_["id"]]
+        far = [s for s in remote if s["asset"] == as_["id"]]
         assets.append({
             **as_,
             "calls": len(touched),
+            "remote_calls": len(far),     # 자기 자리에서 원격 조회 (게이트 미통과 단계)
             "tools": _tools(touched),
+            "remote_tools": _tools(far),
             "agents": sorted({s["agent_id"] for s in touched}),
             "gate": {k: sum(1 for s in touched if s["gate"] == k)
                      for k in sorted({s["gate"] for s in touched if s["gate"]})},
@@ -389,6 +408,8 @@ def _sector_work(did: str, zone: dict[str, Any], mine: list[dict[str, Any]],
         "visitors": visitors,
         "entries": len(entered),           # 실제 진입 횟수 (desk 는 세지 않는다)
         "desk_spans": len(at_desk),
+        "remote": len(remote),             # 자기 자리에서 이 방 자산에 원격 접근한 횟수
+        "remote_tools": _tools(remote),
         "works": sorted({w for v in visitors for w in v["works"]}
                         | {w for a in homed for w in a["authority"].get("works", [])}),
         "homed": [a["agent_id"] for a in homed],

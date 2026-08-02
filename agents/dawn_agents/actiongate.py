@@ -101,12 +101,14 @@ class ActionGate:
         autonomy: str = "A1",
         org_id: str = "",
         model_cost_tier: str = "",
+        catalog=None,
     ) -> None:
         self.gate = gate
         self.eg = eg_store
         self.autonomy = autonomy
         self.org_id = org_id
         self.model_cost_tier = model_cost_tier
+        self.catalog = catalog          # dawn_core.gate.ToolCatalog — 루프 계측 선언원
 
     # ── 판정 ────────────────────────────────────────────────────────────
     def evaluate(self, preview, *, declared_tools: list[str] | None = None) -> GateDecision:
@@ -225,6 +227,21 @@ class ActionGate:
                 sources["l3"] = "require_hitl"
 
         d.decision = _strongest(decisions)
+
+        # 루프 계측(①eg_search ④eg_record)은 **막을 수 없다.** 여기가 HITL 로 걸리면
+        # 에이전트가 자기 작업을 기록하지 못해 "④ 를 마쳐야 완료"라는 불변식이 깨진다.
+        # 자산·심각도·정책 판정은 **그대로 남긴다** — 무엇을 만졌는지는 기록돼야 한다.
+        # 우회 대상은 카탈로그가 선언하고(`loop_instrumentation`), 비가역·고위험
+        # 도구에는 붙일 수 없다(ToolCatalog.load 가 거부한다).
+        if self.catalog is not None and self.catalog.loop_instrumentation(preview.skill):
+            if d.decision != "log_only":
+                reasons.append(
+                    f"루프 계측 — 판정 {d.decision} 이지만 막지 않는다 "
+                    "(막으면 에이전트가 자기 작업을 기록하지 못한다)"
+                )
+                sources["loop_instrumentation"] = "log_only(강제)"
+            d.decision = "log_only"
+
         d.reasons = reasons
         d.sources = sources
         return d

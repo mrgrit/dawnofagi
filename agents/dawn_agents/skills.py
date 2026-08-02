@@ -98,7 +98,11 @@ class SkillRegistry:
     ) -> None:
         if not self.catalog.known(name):
             raise SkillError(f"카탈로그에 없는 스킬: {name} — org/tools.yaml 에 먼저 등록하라")
-        self._skills[name] = Skill(name, run, touches or [], arg_names or [])
+        # 만지는 자산은 **카탈로그가 권위**다. 등록부가 안 적으면 카탈로그에서 채운다 —
+        # 여기 빠뜨리면 심각도가 0 으로 계산돼 가장 위험한 도구가 안전해 보인다.
+        self._skills[name] = Skill(
+            name, run, list(touches or self.catalog.touches(name)), arg_names or []
+        )
 
     def __contains__(self, name: str) -> bool:
         return name in self._skills
