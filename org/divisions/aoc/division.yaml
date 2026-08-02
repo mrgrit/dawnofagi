@@ -8,3 +8,8 @@ teams: [aoc-dev, aoc-ops, aoc-lab]
 zone: dmz
 autonomy_default: A1
 eg_org: org:aoc          # EG OrgUnit 매핑 (make eg-bridge 가 검증)
+
+# 본부장 — **사람**이다. 작업 지시(P7) 결재 1차 승인자.
+lead:
+  role: AOC본부장
+  portal_user: lead-aoc

@@ -66,6 +66,24 @@
       "type": "string",
       "pattern": "^org:[a-z0-9]+(-[a-z0-9]+)*$",
       "description": "EG OrgUnit 노드 id — 통제 평면과 EG 를 잇는 열쇠"
+    },
+    "lead": {
+      "type": "object",
+      "description": "본부장 — **사람**이다. 이 본부의 작업 지시 결재 1차 승인자 (P7). 에이전트가 아니므로 org/agents 에 없다.",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "portal_user": {
+          "type": "string",
+          "description": "그룹웨어 계정 — dawn-web users 로 확인"
+        }
+      },
+      "required": [
+        "role",
+        "portal_user"
+      ],
+      "additionalProperties": false
     }
   }
 }

@@ -137,7 +137,8 @@ class Worker:
         )
 
         self.skills = skills or build_default_registry(
-            self.registry.tool_catalog, root=self.paths.root, eg_store=self.eg
+            self.registry.tool_catalog, root=self.paths.root, eg_store=self.eg,
+            agent_id=self.agent_id
         )
         tier = ""
         if self.profile is not None and self.profile.models:
@@ -209,7 +210,12 @@ class Worker:
             },
         ) as sp:
             res = self.skills.run("eg.search", query=query, limit=limit)
-            sp.set(**{"dawn.eg.hits": res.meta.get("hits", 0), "dawn.gate.decision": "log_only"})
+            sp.set(**{
+                "dawn.eg.hits": res.meta.get("hits", 0),
+                # 무엇을 읽었는지 — 사후에 "이 판단의 근거"를 재구성하려면 필요하다
+                "dawn.eg.hit_ids": ",".join(res.meta.get("hit_ids", [])),
+                "dawn.gate.decision": "log_only",
+            })
         self._step(run, "eg_search", f'"{query}" → {res.meta.get("hits", 0)}건', res.ok)
         return res.output
 

@@ -185,7 +185,8 @@ def _short(v: Any, n: int = 60) -> str:
 # ── 기본 스킬 구현 (읽기 위주) ───────────────────────────────────────────
 
 
-def build_default_registry(catalog, *, root: Path, eg_store=None) -> SkillRegistry:
+def build_default_registry(catalog, *, root: Path, eg_store=None,
+                          agent_id: str = "") -> SkillRegistry:
     """P2 데모에 필요한 스킬을 등록한다.
 
     읽기 스킬은 실동작, 비가역 스킬은 등록만(게이트 테스트용).
@@ -198,7 +199,10 @@ def build_default_registry(catalog, *, root: Path, eg_store=None) -> SkillRegist
             return SkillResult(False, "", "EG 스토어가 없다 — make eg-load")
         hits = eg_store.search(query, type=type, limit=limit)
         lines = [f"{h.id} [{h.type}] {h.name}" for h in hits]
-        return SkillResult(True, "\n".join(lines) or "(없음)", meta={"hits": len(hits)})
+        # **무엇을 읽었는지**를 남긴다. 개수만 남기면 "이 판단이 무엇에 근거했나"를
+        # 사후에 재구성할 수 없다 — EG 축적 루프가 감사 불가능해진다.
+        return SkillResult(True, "\n".join(lines) or "(없음)",
+                           meta={"hits": len(hits), "hit_ids": [h.id for h in hits]})
 
     def eg_record(kind: str, summary: str, detail: str = "") -> SkillResult:
         if eg_store is None:
@@ -216,14 +220,24 @@ def build_default_registry(catalog, *, root: Path, eg_store=None) -> SkillRegist
             ntype,
             summary[:120],
             {"summary": summary, "detail": detail, "recorded_at": now},
-            {"layer": "runtime", "created_by": "agent"},
+            # created_by 를 'agent' 로 뭉뚱그리면 260개 노드가 전부 같은 출처가 된다 —
+            # "누가 이걸 알아냈나"를 못 묻는다. 실제 에이전트 id 를 박는다.
+            {"layer": "runtime", "created_by": agent_id or "agent"},
         )
         return SkillResult(True, f"기록됨: {nid} ({ntype})", meta={"node_id": nid})
 
-    # eg.* 는 **업무 자산을 만지지 않는다** — 루프 자체의 계측이다.
-    # EG 스키마의 Task-TOUCHED->Asset 은 "그 작업이 건드린 업무 자산"을 뜻하지
-    # "작업 기록을 어디에 남겼나"를 뜻하지 않는다. 여기에 asset:eg-db 를 달면
-    # 모든 에이전트의 ①④ 단계가 자기 인프라 때문에 HITL 로 막힌다.
+    # eg.* 의 자산 선언은 **카탈로그가 정한다** (`org/tools.yaml` → asset:eg-db).
+    #
+    # P2 때는 여기에 자산을 달지 않았다. 이유가 둘이었는데 지금은 둘 다 풀렸다:
+    #   ① "①④ 단계가 자기 인프라 때문에 HITL 로 막힌다"
+    #      → 카탈로그의 `loop_instrumentation: true` 가 판정을 log_only 로 강제한다.
+    #        자산·심각도는 그대로 기록하되 막지 않는다.
+    #   ② "Task-TOUCHED->Asset 은 업무 자산을 뜻하지 기록 위치가 아니다"
+    #      → 맞다. 그래서 관제는 eg.* 를 **존 진입으로 세지 않는다**
+    #        (게이트 미통과 = 문을 지난 적 없음). 자기 자리에서의 원격 조회로 그린다.
+    #
+    # 선언을 되살린 이유: EG DB 접근이 로그에 아예 안 남으면 "이 판단이 무엇을
+    # 읽고 나왔나"를 감사할 수 없다.
     reg.register("eg.search", eg_search, arg_names=["query", "type", "limit"])
     reg.register("eg.record", eg_record, arg_names=["kind", "summary", "detail"])
 

@@ -2170,3 +2170,42 @@ make tunnel-status / tunnel-down
 인증이 없으므로 URL 을 아는 사람은 누구나 전 에이전트의 텔레메트리·케이스·자산
 이름과 조직 구조를 본다. 상시 노출로 갈 거라면 Cloudflare Access 를 앞에 붙여야
 한다 — 지금은 임시 URL 이고 프로세스를 죽이면 사라진다.
+
+### P7 준비 — 사람 역할·결재 계정, EG 활용 이력 추적
+
+**사람 역할을 레지스트리에 넣었다.** 지금까지 레지스트리는 **에이전트만** 알았다.
+작업 지시 결재(P7 DoD-2)는 사람이 해야 하므로 사람 역할을 명시한다:
+
+```
+org/company.yaml (신규)              ceo: 대표이사 → portal_user: ceo
+org/divisions/<본부>/division.yaml   lead: 본부장 → portal_user
+```
+
+`division.schema.json` 에 `lead` 를 추가했다 (role · portal_user 필수).
+결재 계정 5종: `ceo` · `lead-aoc` · `lead-ax` · `lead-itops` · `mgmt-head`(기존 재사용).
+본부장은 `hitl.approve.critical` 까지, 대표는 거기에 `aoc.control` 을 더 가진다.
+
+### EG 활용 이력 — 양방향으로 추적되게 고쳤다
+
+"작업에 따라 EG 도 생성·갱신되고, 활용 이력도 추적 가능한가"를 확인하다 **두 방향
+모두 끊겨 있는 걸** 발견했다.
+
+| | 전 | 후 |
+|---|---|---|
+| **읽기** (`eg.search`) | `hits: 3` — **개수만**. 무엇을 읽었는지 없다 | `hit_ids` + 스팬 `dawn.eg.hit_ids` |
+| **쓰기** (`eg.record`) | `created_by: "agent"` — **260개 노드가 전부 같은 출처** | 실제 `agent_id` |
+
+읽기가 개수만 남으면 "이 판단이 무엇에 근거했나"를 사후에 재구성할 수 없다.
+쓰기가 전부 `agent` 면 "누가 이걸 알아냈나"를 물을 수 없다. EG 축적 루프 자체가
+감사 불가능한 상태였다 — EU AI Act 12조가 요구하는 사후 재구성이 반쪽이었다.
+
+**P2 주석과의 충돌도 정리했다.** `skills.py` 에 "eg.* 는 업무 자산을 만지지 않는다"는
+P2 때 주석이 남아 Q7 변경과 모순돼 있었다. 그 주석이 든 이유 둘은 지금 다 풀렸다 —
+①HITL 차단은 `loop_instrumentation` 이, ②"Task-TOUCHED->Asset 은 업무 자산을
+뜻한다"는 관제가 eg.* 를 **존 진입으로 세지 않는 것**으로. 결론을 갱신해 적었다.
+
+검증: `pytest` **306개 통과** (신규 2개 — EG 양방향 추적) · `make check` 전부 통과.
+
+**계정 비밀번호 일괄 초기화** (사용자 요청). 최소 8자 정책(`auth.hash_password`)이
+있어 4자는 거부된다 — **정책을 낮추지 않고** 8자로 맞췄다. 10개 계정 전부
+`authenticate()` 로 로그인 확인. 평문은 저장소에 남기지 않는다(gitleaks).

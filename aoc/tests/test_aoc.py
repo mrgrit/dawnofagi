@@ -535,3 +535,50 @@ def test_judge_store_round_trips(tmp_path):
     assert d["groundedness"] == 55 and d["purpose"] == "work"
     assert "raw" not in d, "원문은 트레이스에 있다 — 두 번 저장하지 않는다"
     assert s.results()["t1"].failed
+
+
+# ── EG 활용 이력 (P7 전제) ────────────────────────────────────────────────
+
+
+def test_eg_usage_is_traceable_both_ways(repo_root):
+    """"이 판단이 무엇을 읽고 나왔나"와 "누가 이걸 알아냈나"를 물을 수 있어야 한다.
+
+    전에는 읽기가 **개수만**(`hits`) 남고 쓰기는 `created_by='agent'` 로 뭉뚱그려져
+    260개 노드의 출처가 전부 같았다. EG 축적 루프가 감사 불가능했다.
+    """
+    from dawn_agents.skills import build_default_registry
+    from dawn_core import Registry
+    from dawn_core.eg.cli import db_path
+    from dawn_core.eg.store import EGStore
+
+    reg = Registry.load(repo_root)
+    db = db_path(reg.paths)
+    if not db.is_file():
+        pytest.skip("EG DB 없음")
+    eg = EGStore(db)
+    sk = build_default_registry(reg.tool_catalog, root=repo_root, eg_store=eg,
+                                agent_id=CCC)
+
+    # 읽기 — 무엇을 읽었는지 id 로 남는다
+    res = sk.run("eg.search", query="정책", limit=3)
+    assert res.ok
+    assert "hit_ids" in res.meta, "읽은 노드 id 가 안 남으면 근거 재구성이 불가능하다"
+    assert len(res.meta["hit_ids"]) == res.meta["hits"]
+
+    # 쓰기 — 누가 기록했는지 남는다
+    rec = sk.run("eg.record", kind="observation", summary="테스트 관측 (감사 추적 확인)")
+    assert rec.ok
+    node = eg.node(rec.meta["node_id"])
+    assert node is not None
+    assert node.meta.get("created_by") == CCC, \
+        f"created_by 가 {node.meta.get('created_by')} — 어느 에이전트인지 알 수 없다"
+
+
+def test_worker_span_carries_what_eg_was_read(repo_root):
+    """스팬에 읽은 노드 id 가 실려야 사후 재구성이 된다 (EU AI Act 12조)."""
+    import inspect
+
+    from dawn_agents import worker as worker_mod
+
+    src = inspect.getsource(worker_mod.Worker.eg_search)
+    assert "dawn.eg.hit_ids" in src, "eg.search 스팬이 읽은 노드를 안 싣는다"
