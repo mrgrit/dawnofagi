@@ -267,7 +267,7 @@ def cmd_intake(args) -> int:
     홈페이지(L0 프로세스)는 사내 DB 에 손대지 않는다. 파일로 떨어뜨리고,
     **사내 쪽에서 당겨 온다.** 방향이 반대면 공개 프로세스가 내부에 쓰게 된다.
     """
-    from .events import ingest_inquiries
+    from .events import ingest_inquiries, ingest_work_requests
 
     n, ids = ingest_inquiries(_root(), tenant=args.tenant)
     print(f"{B}문의 흡수{Z}  새 {n}건  {D}(중복 제외){Z}")
@@ -275,6 +275,52 @@ def cmd_intake(args) -> int:
         print(f"    문의 #{i}")
     if n and not args.no_run:
         print(f"  {D}처리하려면: dawn-biz run inquiry <id>{Z}")
+
+    m, wids = ingest_work_requests(_root(), tenant=args.tenant)
+    print(f"{B}작업 요청 흡수{Z}  새 {m}건  {D}(중복·규칙위반 제외){Z}")
+    for i in wids:
+        print(f"    작업 지시 #{i}  {D}결재 대기{Z}")
+    if m:
+        print(f"  {D}확인: dawn-biz orders{Z}")
+    return 0
+
+
+def cmd_orders(args) -> int:
+    """작업 지시 — 접수부터 완료까지의 실행 단위 (P7)."""
+    from dawn_core import workintake
+
+    s = _store(args)
+    if args.id:
+        r = s.work_order(args.id)
+        if r is None:
+            print(f"작업 지시 없음: {args.id}")
+            return 2
+        print(f"{B}작업 지시 #{r['id']}{Z}  {r['title']}")
+        for k in ("status", "origin", "requester", "requester_org", "contact",
+                  "business", "division", "work_domain", "zone", "infra_tier",
+                  "created_at"):
+            print(f"    {k:<14} {r[k]}")
+        chain = workintake.approval_chain(
+            _root(), business=r["business"], infra_tier=r["infra_tier"],
+            division=r["division"], origin=r["origin"])
+        print(f"  {B}결재 라인{Z}")
+        for i, c in enumerate(chain, 1):
+            print(f"    {i}. {c['role']:<10} {c['portal_user']:<12} {D}{c['reason']}{Z}")
+        if not chain:
+            print(f"    {D}(담당 본부에 lead 가 없다 — division.yaml 확인){Z}")
+        if r["body"]:
+            print(f"  {B}내용{Z}\n    " + r["body"].replace("\n", "\n    ")[:800])
+        return 0
+
+    rows = s.work_orders(status=args.status, origin=args.origin)
+    print(f"{B}작업 지시{Z} (테넌트 {args.tenant})")
+    if not rows:
+        print(f"  {D}없다{Z}")
+        return 0
+    print(f"  {D}id   상태               출처        사업              환경        제목{Z}")
+    for r in rows:
+        print(f"  {r['id']:<4} {r['status']:<18} {r['origin']:<10} "
+              f"{r['business']:<17} {r['infra_tier']:<10} {r['title'][:40]}")
     return 0
 
 
@@ -336,9 +382,15 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--dry-run", action="store_true")
     x.set_defaults(func=cmd_emit)
 
-    x = s.add_parser("intake", help="홈페이지 문의 접수함 → CRM")
+    x = s.add_parser("intake", help="홈페이지 접수함(문의·작업 요청) → 사내 DB")
     x.add_argument("--no-run", action="store_true")
     x.set_defaults(func=cmd_intake)
+
+    x = s.add_parser("orders", help="작업 지시 — 접수→결재→환경→착수 (P7)")
+    x.add_argument("id", nargs="?", type=int)
+    x.add_argument("--status", default="")
+    x.add_argument("--origin", default="", choices=["", "external", "internal", "standing"])
+    x.set_defaults(func=cmd_orders)
 
     x = s.add_parser("seed", help="데모 업무 데이터")
     x.add_argument("--force", action="store_true")

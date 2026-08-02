@@ -362,3 +362,95 @@ def test_seed_documents_are_pointers_not_copies(tmp_path):
     docs = [d for d in s.documents() if "COMPANY.md" in d["body"]]
     assert docs, "통제 문서 포인터가 없다"
     assert len(docs[0]["body"]) < 1000, "본문 사본을 두면 두 벌이 갈라진다"
+
+
+# ── 작업 지시 (P7 DoD-1·2) ───────────────────────────────────────────────
+
+
+def test_work_order_is_separate_from_inquiry(tmp_path):
+    """문의는 '물어봄', 작업 지시는 '실행 단위'다. 한 테이블에 섞으면 결재·
+    프로비저닝·집계가 문의에도 붙어 버린다."""
+    s = BizStore(tmp_path, tenant=0)
+    wid = s.add_work_order(title="데모 환경", body="본문", origin="external",
+                           business="ax-consulting", division="ax",
+                           infra_tier="container")
+    iid = s.add_inquiry(name="a", email="a@b.co", message="문의입니다")
+    assert s.work_order(wid)["title"] == "데모 환경"
+    assert s.inquiry(iid)["message"] == "문의입니다"
+    assert s.work_order(iid + 999) is None
+
+
+def test_work_order_rejects_unknown_values(tmp_path):
+    s = BizStore(tmp_path, tenant=0)
+    for kw in ({"origin": "hacker"}, {"infra_tier": "cloud"}, {"title": "  "}):
+        with pytest.raises(ValueError):
+            s.add_work_order(title=kw.pop("title", "제목"), body="", **kw)
+
+
+def test_intake_choices_come_from_business_manifests(root):
+    """폼 선택지가 하드코딩이면 사업을 추가해도 접수할 수 없다."""
+    from dawn_core import Registry, workintake
+
+    cs = {c.id: c for c in workintake.choices(root, include_planned=True)}
+    reg = Registry.load(root)
+    assert set(cs) == set(reg.businesses), "사업 목록이 매니페스트와 다르다"
+    for bid, c in cs.items():
+        allowed = (reg.businesses[bid].data.get("infra") or {}).get("allowed", [])
+        assert c.tiers == allowed, f"{bid}: 등급 선택지가 매니페스트와 다르다"
+
+
+def test_intake_rejects_tier_the_business_forbids(root):
+    """등급 선택은 사업이 허용한 범위 안에서만 — 화면이 아니라 규칙이 막는다."""
+    from dawn_core import workintake
+
+    with pytest.raises(ValueError, match="허용하지 않는다"):
+        workintake.validate(root, business="foundation-model", infra_tier="container")
+    with pytest.raises(ValueError, match="알 수 없는 사업"):
+        workintake.validate(root, business="nope", infra_tier="none")
+    div, tier = workintake.validate(root, business="ax-consulting",
+                                    infra_tier="container")
+    assert (div, tier) == ("ax", "container")
+
+
+def test_approval_chain_is_derived_not_hardcoded(root):
+    """결재 라인은 규칙에서 나온다 — 등급·민감도·출처가 대표이사를 부른다."""
+    from dawn_core import workintake
+
+    def roles(**kw):
+        return [c["role"] for c in workintake.approval_chain(root, **kw)]
+
+    # 기본: 본부장 1단계
+    assert roles(business="ax-consulting", infra_tier="container",
+                 division="ax", origin="internal") == ["AX본부장"]
+    # vm 이상 → 외부 시스템 자원 점유 → 대표이사
+    assert roles(business="ax-consulting", infra_tier="vm",
+                 division="ax", origin="internal") == ["AX본부장", "대표이사"]
+    # 외부 고객 요청 → 대표이사
+    assert roles(business="ax-consulting", infra_tier="container",
+                 division="ax", origin="external") == ["AX본부장", "대표이사"]
+    # L3 사업 → 대표이사
+    assert roles(business="foundation-model", infra_tier="vm",
+                 division="aoc", origin="internal") == ["AOC본부장", "대표이사"]
+
+
+def test_approval_chain_points_at_real_portal_accounts(root):
+    """결재자가 실재하지 않으면 결재가 영원히 안 끝난다."""
+    import sys
+
+    sys.path.insert(0, str(root / "apps" / "groupware"))
+    from dawn_core import Registry, workintake
+    from dawn_groupware.auth import UserStore
+
+    users = {u.username for u in UserStore(root).list()}
+    if not users:
+        pytest.skip("계정 없음")
+    for bid in Registry.load(root).businesses:
+        for tier in ("none", "container", "vm", "server"):
+            try:
+                div, t = workintake.validate(root, business=bid, infra_tier=tier)
+            except ValueError:
+                continue
+            for c in workintake.approval_chain(root, business=bid, infra_tier=t,
+                                               division=div, origin="external"):
+                assert c["portal_user"] in users, \
+                    f"{bid}/{t}: 결재자 {c['portal_user']} 계정이 없다"

@@ -83,7 +83,17 @@ SITE_CSS = """
 .ladder .s b{color:var(--acc)}
 """
 
-NAV = [("/", "홈"), ("/business", "사업"), ("/org", "조직"), ("/contact", "문의")]
+# 인프라 등급 설명 — 요청자가 고르는 것이라 사람 말로 적는다.
+# 목록 자체는 dawn_core.workintake.TIER_LABEL 이 권위다 (여기는 화면 표기).
+TIER_LABELS = {
+    "none": ("환경 불필요", "진단·검토·문서 작업"),
+    "container": ("컨테이너", "데모·PoC·단기 실험"),
+    "vm": ("가상머신", "프로덕트 구축·이관"),
+    "server": ("전용 서버", "상시 운영·대규모"),
+}
+
+NAV = [("/", "홈"), ("/business", "사업"), ("/org", "조직"),
+       ("/request", "작업 요청"), ("/contact", "문의")]
 
 # ── 문의 폼 방어 ─────────────────────────────────────────────────────────
 MAX_LEN = {"name": 80, "email": 160, "org": 120, "message": 4000}
@@ -317,6 +327,126 @@ def _contact_body(*, error: str = "", ok: bool = False,
     ])
 
 
+# ── 작업 요청 (P7) ───────────────────────────────────────────────────────
+#
+# 문의와 **다르다.** 문의는 "물어봄"이고 작업 요청은 "해달라"다. 그래서 접수 즉시
+# 작업 지시가 만들어지고 결재 라인이 붙는다.
+#
+# 선택지(사업·인프라 등급)는 화면이 정하지 않는다 — `dawn_core.workintake` 가 매니페스트에서
+# 뽑아 준다. 접수 경로가 늘어나도(그룹웨어·API·챗봇) 규칙이 한 곳에 있게.
+
+
+def _biz_choices(root):
+    # 레지스트리(org/)만 읽는다 — 업무 DB 로 가는 경로를 만들지 않는다 (P4 격리).
+    from dawn_core import workintake
+
+    return workintake.choices(Path(root))
+
+
+def _request_body(root, *, error: str = "", ok: bool = False, order_id: int = 0,
+                  chain=None, values: dict[str, str] | None = None) -> Safe:
+    v = values or {}
+    if ok:
+        steps = " → ".join(f"{c['role']}" for c in (chain or [])) or "담당 부서"
+        _ = order_id
+        return join([
+            h1("작업 요청"),
+            div("접수했다. 담당 부서가 확인 후 결재를 올린다.", class_="flash ok"),
+            p(f"결재 순서: {steps}"),
+            p("승인이 끝나면 작업 환경이 준비되고 담당 에이전트가 착수한다.", class_="dim"),
+            p(a("← 홈으로", href="/")),
+        ])
+    bcs = _biz_choices(root)
+    opts = [Safe('<option value="">— 선택 —</option>')]
+    for c in bcs:
+        sel = " selected" if v.get("business") == c.id else ""
+        opts.append(Safe(f'<option value="{c.id}"{sel}>') + c.name +
+                    Safe(f' ({", ".join(c.tiers)})</option>'))
+    tier_rows = []
+    for label, desc in TIER_LABELS.values():
+        tier_rows.append(Safe('<div style="margin:2px 0">') +
+                         small(f"{label} — {desc}") + Safe("</div>"))
+    return join([
+        h1("작업 요청"),
+        p("도입·구축·개선 요청을 접수한다. 문의(질문)와 달리 접수 즉시 "
+          "담당 본부의 결재 라인이 붙는다.", class_="lede"),
+        div(error, class_="flash bad") if error else None,
+        Safe('<form class="stack" method="post" action="/request">'),
+        Safe('<div><label for="r-name">이름 *</label>')
+        + input_(type="text", id="r-name", name="name", required=True,
+                 maxlength=MAX_LEN["name"], value=v.get("name", "")) + Safe("</div>"),
+        Safe('<div><label for="r-email">이메일 *</label>')
+        + input_(type="email", id="r-email", name="email", required=True,
+                 maxlength=MAX_LEN["email"], value=v.get("email", "")) + Safe("</div>"),
+        Safe('<div><label for="r-org">소속</label>')
+        + input_(type="text", id="r-org", name="org", maxlength=MAX_LEN["org"],
+                 value=v.get("org", "")) + Safe("</div>"),
+        Safe('<div><label for="r-biz">사업 *</label><select id="r-biz" name="business" required>')
+        + join(opts) + Safe("</select></div>"),
+        Safe('<div><label for="r-tier">필요한 환경 *</label>')
+        + Safe('<select id="r-tier" name="infra_tier" required>')
+        + join([Safe(f'<option value="{t}"'
+                     f'{" selected" if v.get("infra_tier") == t else ""}>')
+                + TIER_LABELS[t][0] + Safe("</option>")
+                for t in ("none", "container", "vm", "server")])
+        + Safe("</select></div>"),
+        join(tier_rows),
+        Safe('<div><label for="r-title">제목 *</label>')
+        + input_(type="text", id="r-title", name="title", required=True,
+                 maxlength=MAX_LEN["name"], value=v.get("title", "")) + Safe("</div>"),
+        Safe('<div><label for="r-msg">내용 *</label>')
+        + textarea("message", v.get("message", ""), id="r-msg", required=True,
+                   maxlength=MAX_LEN["message"]) + Safe("</div>"),
+        Safe('<div style="position:absolute;left:-9999px" aria-hidden="true">')
+        + Safe('<label for="r-web">website</label>')
+        + input_(type="text", id="r-web", name="website", tabindex="-1",
+                 autocomplete="off") + Safe("</div>"),
+        input_(type="hidden", name="ts", value=str(int(time.time()))),
+        Safe('<div><button type="submit">요청하기</button></div>'),
+        Safe("</form>"),
+        p(small("사업마다 선택 가능한 환경이 다르다. 허용되지 않은 조합은 거부된다."),
+          class_="dim"),
+    ])
+
+
+async def work_request(request: Request) -> HTMLResponse:
+    return _shell("작업 요청", _request_body(request.app.state.root), "/request")
+
+
+async def work_request_post(request: Request) -> HTMLResponse:
+    from dawn_core import workintake
+
+    root = Path(request.app.state.root)
+    form_data = await request.form()
+    keys = ("name", "email", "org", "message", "title", "business", "infra_tier")
+    values = {k: _utf8(str(form_data.get(k, "")))[:MAX_LEN.get(k, 200)] for k in keys}
+    ip = request.client.host if request.client else "-"
+
+    err = _validate_contact(form_data, values, ip)
+    if not err and not values["title"].strip():
+        err = "제목을 입력하라."
+    if not err:
+        try:
+            division, tier = workintake.validate(
+                root, business=values["business"], infra_tier=values["infra_tier"])
+        except ValueError as e:
+            err = str(e)
+    if err:
+        return _shell("작업 요청", _request_body(root, error=err, values=values), "/request")
+
+    # **접수함에 떨군다. 업무 DB 에 직접 쓰지 않는다.**
+    # 공개 사이트는 zone:ext 이고 업무 DB 는 dmz/int 다 — 여기서 DB 로 직접 가는
+    # 경로를 만들면 공개면 취약점 하나가 내부 데이터까지 닿는다. 문의와 같은 방식으로
+    # 파일에 떨구고 `dawn-biz intake` 가 가져가 작업 지시로 승격한다.
+    path = Path(root) / "var" / "website" / "work_requests.jsonl"
+    jsonl.append(path, {"at": _now(), "ip": ip, "origin": "external",
+                        "division": division, "infra_tier": tier, **values})
+    chain = workintake.approval_chain(root, business=values["business"], infra_tier=tier,
+                                      division=division, origin="external")
+    _recent.setdefault(ip, []).append(time.time())
+    return _shell("작업 요청", _request_body(root, ok=True, chain=chain), "/request")
+
+
 async def contact_post(request: Request) -> HTMLResponse:
     form_data = await request.form()
     values = {k: _utf8(str(form_data.get(k, "")))[:MAX_LEN.get(k, 200)]
@@ -373,6 +503,8 @@ routes = [
     Route("/", home),
     Route("/business", business),
     Route("/org", org),
+    Route("/request", work_request, methods=["GET"]),
+    Route("/request", work_request_post, methods=["POST"]),
     Route("/contact", contact, methods=["GET"]),
     Route("/contact", contact_post, methods=["POST"]),
     Route("/healthz", health),

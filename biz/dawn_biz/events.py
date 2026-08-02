@@ -113,4 +113,42 @@ def ingest_inquiries(root: Path, *, tenant: int = 0) -> tuple[int, list[int]]:
     return len(new_ids), new_ids
 
 
-__all__ = ["ROUTES", "business_dispatcher", "ingest_inquiries", "run_event"]
+def ingest_work_requests(root: Path, *, tenant: int = 0) -> tuple[int, list[int]]:
+    """홈페이지 작업 요청 접수함 → 작업 지시. 문의와 같은 방향이다.
+
+    공개 사이트(zone:ext)는 사내 DB 에 손대지 않는다. 파일로 떨어뜨리고 **사내에서
+    당겨 온다.** 방향이 반대면 공개면 취약점 하나가 내부 데이터까지 닿는다.
+
+    승격된 작업 지시는 곧바로 `pending_approval` 이다 — 접수 자체가 결재 요청이다.
+    """
+    from dawn_core import workintake
+
+    path = Path(root) / "var" / "website" / "work_requests.jsonl"
+    if not path.is_file():
+        return 0, []
+    store = BizStore(root, tenant=tenant)
+    seen = {(r["contact"], r["title"]) for r in store.work_orders(limit=1000)}
+    new_ids: list[int] = []
+    for rec in jsonl.read(path):
+        key = (rec.get("email", ""), str(rec.get("title", "")))
+        if key in seen or not rec.get("title"):
+            continue
+        try:                       # 접수 이후 매니페스트가 바뀌었을 수 있다
+            division, tier = workintake.validate(
+                root, business=rec.get("business", ""),
+                infra_tier=rec.get("infra_tier", "none"))
+        except ValueError:
+            continue               # 규칙에 안 맞는 접수는 승격하지 않는다 (파일엔 남는다)
+        seen.add(key)
+        wid = store.add_work_order(
+            title=rec.get("title", ""), body=rec.get("message", ""), origin="external",
+            requester=rec.get("name", ""), requester_org=rec.get("org", ""),
+            contact=rec.get("email", ""), business=rec.get("business", ""),
+            division=division, infra_tier=tier)
+        store.set_work_order_status(wid, "pending_approval")
+        new_ids.append(wid)
+    return len(new_ids), new_ids
+
+
+__all__ = ["ROUTES", "business_dispatcher", "ingest_inquiries",
+           "ingest_work_requests", "run_event"]

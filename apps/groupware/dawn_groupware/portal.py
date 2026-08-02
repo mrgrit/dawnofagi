@@ -17,6 +17,7 @@ import functools
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from dawn_agents.hitl import ApprovalQueue
@@ -119,6 +120,10 @@ def check_csrf(request: Request, form_data) -> bool:
     return bool(have) and secrets.compare_digest(sent, have)
 
 
+def _root(request: Request) -> Path:
+    return Path(request.app.state.root)
+
+
 def _audit(request: Request) -> AuditLog:
     return request.app.state.audit
 
@@ -184,6 +189,7 @@ def _sidebar(request: Request, user: User, current: str) -> Safe:
         ("/aoc", "관제", "aoc.view", None),
         ("업무", "", "", None),
         ("/", "대시보드", "portal.view", None),
+        ("/orders", "작업 지시", "portal.view", None),
         ("/notices", "공지", "portal.view", None),
         ("/documents", "문서", "portal.view", None),
         ("/calendar", "일정", "portal.view", None),
@@ -829,6 +835,112 @@ async def aoc_view(request: Request) -> Response:
 # ── 공지·문서·일정·디렉터리 ──────────────────────────────────────────────
 
 
+# ── 작업 지시 (P7) ───────────────────────────────────────────────────────
+#
+# 내부 접수 경로. 홈페이지(외부)와 **같은 도메인**에 쓰고 **같은 규칙**을 쓴다
+# (`dawn_core.workintake`). 다른 점은 둘뿐이다:
+#   · 요청자가 로그인 계정이다 (외부는 이메일)
+#   · 업무 DB 에 직접 쓴다 (외부는 파일로 떨구고 사내가 당겨 온다 — P4 격리)
+
+
+@require("portal.view")
+async def orders(request: Request) -> Response:
+    from dawn_biz.store import BizStore
+    from dawn_core import workintake
+
+    user: User = request.state.user
+    root = _root(request)
+    store = BizStore(root)
+    rows = store.work_orders(limit=100)
+    cards = []
+    for r in rows:
+        chain = workintake.approval_chain(
+            root, business=r["business"], infra_tier=r["infra_tier"],
+            division=r["division"], origin=r["origin"])
+        mine = any(c["portal_user"] == user.username for c in chain)
+        cards.append(div(
+            Safe(f'<b>#{r["id"]} {h(r["title"])}</b>')
+            + Safe(" ") + span(r["status"], class_="tag")
+            + (Safe(" ") + span("내 결재", class_="tag acc") if mine else Safe("")),
+            small(f'{r["origin"]} · {r["business"]} · {r["division"]} · '
+                  f'환경 {r["infra_tier"]} · {r["requester"] or "—"}', class_="dim"),
+            small("결재: " + (" → ".join(f'{c["role"]}({c["portal_user"]})' for c in chain)
+                             or "라인 없음"), class_="dim"),
+            class_="card"))
+    body = join([
+        h1("작업 지시"),
+        p("접수 → 결재 → 환경 준비 → 착수 → 검수 → 완료. "
+          "결재 라인은 사업·인프라 등급·민감도에서 파생한다.", class_="dim"),
+        _order_form(request) if user.can("portal.post") else None,
+        join(cards) if cards else p("작업 지시가 없다.", class_="empty"),
+    ])
+    return _shell(request, user, "작업 지시", body, current="/orders")
+
+
+def _order_form(request: Request) -> Safe:
+    from dawn_core import workintake
+
+    cs = workintake.choices(_root(request), include_planned=True)
+    opts = [Safe('<option value="">— 사업 선택 —</option>')]
+    for c in cs:
+        opts.append(Safe(f'<option value="{h(c.id)}">') + Safe(h(c.name))
+                    + Safe(f' — 환경 {h(", ".join(c.tiers))}</option>'))
+    tiers = [Safe(f'<option value="{t}">') + Safe(h(lbl)) + Safe("</option>")
+             for t, (lbl, _d) in workintake.TIER_LABEL.items()]
+    return Safe('<details class="card"><summary>새 작업 지시</summary>'
+                '<form class="stack" method="post" action="/orders" style="margin-top:10px">'
+                ) + join([
+        csrf_field(request),
+        Safe('<div><label for="o-t">제목</label>')
+        + input_(type="text", id="o-t", name="title", required=True, maxlength="200")
+        + Safe("</div>"),
+        Safe('<div><label for="o-biz">사업</label><select id="o-biz" name="business" required>')
+        + join(opts) + Safe("</select></div>"),
+        Safe('<div><label for="o-tier">필요한 환경</label>')
+        + Safe('<select id="o-tier" name="infra_tier" required>') + join(tiers)
+        + Safe("</select></div>"),
+        Safe('<div><label for="o-b">내용</label>')
+        + textarea("body", "", id="o-b", rows="5") + Safe("</div>"),
+        Safe('<div><button type="submit">접수</button></div>'),
+    ]) + Safe("</form></details>")
+
+
+@require("portal.view")
+async def orders_post(request: Request) -> Response:
+    from dawn_biz.store import BizStore
+    from dawn_core import workintake
+
+    user: User = request.state.user
+    if not user.can("portal.post"):
+        return _forbidden(request, user, "portal.post")
+    root = _root(request)
+    form = await request.form()
+    if not check_csrf(request, form):
+        return RedirectResponse("/orders", status_code=303)
+    title = str(form.get("title", "")).strip()[:200]
+    business = str(form.get("business", ""))
+    tier = str(form.get("infra_tier", "none"))
+    body_text = str(form.get("body", ""))[:8000]
+    try:
+        division, tier = workintake.validate(root, business=business, infra_tier=tier)
+        if not title:
+            raise ValueError("제목이 비었다")
+    except ValueError as e:
+        return _shell(request, user, "작업 지시",
+                      join([h1("작업 지시"), div(str(e), class_="flash bad"),
+                            p(a("← 돌아가기", href="/orders"))]), current="/orders")
+
+    store = BizStore(root)
+    wid = store.add_work_order(
+        title=title, body=body_text, origin="internal", requester=user.username,
+        requester_org=user.org, business=business, division=division, infra_tier=tier)
+    store.set_work_order_status(wid, "pending_approval")
+    _audit(request).write("portal.order.create", actor=user.username,
+                          target=f"work_order:{wid}", ip=_ip(request),
+                          business=business, tier=tier, division=division)
+    return RedirectResponse("/orders", status_code=303)
+
+
 @require("portal.view")
 async def notices(request: Request) -> Response:
     user: User = request.state.user
@@ -1302,6 +1414,8 @@ routes = [
     Route("/eg/{kind}/{node_id}", eg_node, methods=["GET"]),
     Route("/eg/{kind}/{node_id}", eg_node_post, methods=["POST"]),
     Route("/aoc", aoc_view),
+    Route("/orders", orders, methods=["GET"]),
+    Route("/orders", orders_post, methods=["POST"]),
     Route("/notices", notices, methods=["GET"]),
     Route("/notices", notices_post, methods=["POST"]),
     Route("/documents", documents, methods=["GET"]),

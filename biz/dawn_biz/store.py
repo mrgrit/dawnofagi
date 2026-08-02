@@ -19,7 +19,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 LEVEL_RANK = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}
 
@@ -34,12 +34,14 @@ KIND_ASSET = {
     "task": "asset:project",
     "expense": "asset:ledger",
     "fixed_asset": "asset:fixed-asset",
+    "work_order": "asset:project",
 }
 
 # 종류별 기본 보안등급. 경비(L3)는 인사·재무이므로 로컬 모델 전용 경로를 탄다.
 KIND_LEVEL = {
     "document": "L1", "customer": "L2", "inquiry": "L2", "contract": "L2",
     "project": "L1", "task": "L1", "expense": "L3", "fixed_asset": "L1",
+    "work_order": "L1",
 }
 
 SCHEMA = """
@@ -170,6 +172,32 @@ CREATE TABLE IF NOT EXISTS expense (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS work_order (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant INTEGER NOT NULL,
+  -- 어디서 왔나. external=홈페이지 고객 · internal=그룹웨어 직원 · standing=상시 작업
+  origin TEXT NOT NULL DEFAULT 'internal',
+  requester TEXT NOT NULL DEFAULT '',
+  requester_org TEXT NOT NULL DEFAULT '',
+  contact TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  business TEXT NOT NULL DEFAULT '',        -- org/businesses/<id> — 인프라 등급 선택지의 출처
+  division TEXT NOT NULL DEFAULT '',        -- 담당 본부 — 결재 라인이 여기서 나온다
+  work_domain TEXT NOT NULL DEFAULT '',     -- work/<도메인> — 어느 SOP 를 쓰나
+  zone TEXT NOT NULL DEFAULT '',
+  infra_tier TEXT NOT NULL DEFAULT 'none',  -- none|container|vm|server (접수 시 선택)
+  status TEXT NOT NULL DEFAULT 'received',
+  parent_id INTEGER,
+  inquiry_id INTEGER,                       -- 문의에서 승격된 경우
+  approvals TEXT NOT NULL DEFAULT '[]',     -- 결재 이력 (JSON)
+  trace_id TEXT NOT NULL DEFAULT '',
+  security_level TEXT NOT NULL DEFAULT 'L1',
+  eg_asset TEXT NOT NULL DEFAULT 'asset:project',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS fixed_asset (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant INTEGER NOT NULL,
@@ -356,6 +384,63 @@ class BizStore:
         return self._insert("customer", name=name, segment=segment,
                             contact_name=contact_name, contact_email=contact_email,
                             note=note, owner_org=owner_org, created_at=_now())
+
+    # ── 작업 지시 (P7) ──────────────────────────────────────────────────
+    #
+    # 문의(inquiry)와 **분리한다.** 문의는 대화이고 작업 지시는 실행 단위다.
+    # 문의가 작업 지시로 승격될 수 있고(`inquiry_id`), 그때도 원본 문의는 남는다.
+
+    STATUSES: ClassVar[tuple[str, ...]] = (
+        "received", "reviewing", "pending_approval", "approved", "provisioning",
+        "in_progress", "reviewing_output", "done", "rejected", "waiting_infra",
+    )
+
+    def add_work_order(self, *, title: str, body: str, origin: str = "internal",
+                       requester: str = "", requester_org: str = "", contact: str = "",
+                       business: str = "", division: str = "", work_domain: str = "",
+                       zone: str = "", infra_tier: str = "none",
+                       inquiry_id: int | None = None,
+                       parent_id: int | None = None) -> int:
+        if origin not in ("external", "internal", "standing"):
+            raise ValueError(f"알 수 없는 origin: {origin}")
+        if infra_tier not in ("none", "container", "vm", "server"):
+            raise ValueError(f"알 수 없는 infra_tier: {infra_tier}")
+        if not title.strip():
+            raise ValueError("제목이 비었다")
+        now = _now()
+        return self._insert(
+            "work_order", origin=origin, requester=requester,
+            requester_org=requester_org, contact=contact, title=title.strip(),
+            body=body, business=business, division=division, work_domain=work_domain,
+            zone=zone, infra_tier=infra_tier, inquiry_id=inquiry_id,
+            parent_id=parent_id, created_at=now, updated_at=now)
+
+    def work_orders(self, *, status: str = "", origin: str = "",
+                    max_level: str = "L3", limit: int = 200) -> list[Row]:
+        where, params = [], []
+        if status:
+            where.append("status=?")
+            params.append(status)
+        if origin:
+            where.append("origin=?")
+            params.append(origin)
+        return self._rows("work_order", " AND ".join(where), tuple(params),
+                          max_level=max_level, limit=limit)
+
+    def work_order(self, wid: int, *, max_level: str = "L3") -> Row | None:
+        return self._one("work_order", wid, max_level=max_level)
+
+    def set_work_order_status(self, wid: int, status: str, *, note: str = "") -> None:
+        """상태 전이. **아무 상태로나 못 간다** — 전이표가 통제 평면의 일부다."""
+        if status not in self.STATUSES:
+            raise ValueError(f"알 수 없는 상태: {status}")
+        row = self.work_order(wid)
+        if row is None:
+            raise KeyError(f"작업 지시 없음: {wid}")
+        self.db.execute("UPDATE work_order SET status=?,updated_at=? WHERE id=? AND tenant=?",
+                        (status, _now(), wid, self.tenant))
+        self.db.commit()
+        _ = note
 
     def customers(self, *, max_level: str = "L3", limit: int = 200) -> list[Row]:
         return self._rows("customer", max_level=max_level, limit=limit)
