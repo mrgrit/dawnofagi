@@ -109,13 +109,26 @@ def _reason_of(detail: dict[str, Any]) -> str:
     return ""
 
 
+# 테스트 클라이언트가 남긴 감사 줄. Starlette `TestClient` 는 클라이언트 주소를
+# 이 문자열로 고정한다 — **추론이 아니라 출처가 기록돼 있다.**
+TEST_CLIENT_IPS = frozenset({"testclient", "127.0.0.1:testclient"})
+
+
 def is_judgment(rec: dict[str, Any]) -> bool:
     """이 감사 줄이 사람의 판단인가.
 
-    셋을 모두 만족해야 한다 — 선언된 경로 · 명시된 결정 · 사유.
+    넷을 모두 만족해야 한다 — 선언된 경로 · 명시된 결정 · 사유 · **사람의 요청**.
     하나라도 없으면 판단으로 세지 않는다. **틀린 표본은 없는 표본보다 나쁘다.**
+
+    마지막 조건이 필요한 이유: `conftest.py` 가 테스트 중 적재를 끄지만
+    **백필은 그 스위치가 생기기 전의 이력을 읽는다.** 실측(2026-08-03)으로
+    백필이 가져온 3건이 전부 테스트 픽스처였고 — 사유가 "승인" · "범위 밖" ·
+    "P4 자기검증" 이었다 — 감사 줄의 `ip` 가 전부 `testclient` 였다.
+    스위치는 앞을 막고 이건 뒤를 막는다.
     """
     if action_source(str(rec.get("action", ""))) is None:
+        return False
+    if str(rec.get("ip", "")).strip() in TEST_CLIENT_IPS:
         return False
     detail = rec.get("detail") or {}
     if not str(detail.get("decision", "")).strip():
@@ -303,6 +316,9 @@ def backfill(store, audit_path, *, apply: bool = False) -> dict[str, Any]:
             if action_source(str(rec.get("action", ""))) is None:
                 continue
             detail = rec.get("detail") or {}
+            if str(rec.get("ip", "")).strip() in TEST_CLIENT_IPS:
+                skipped["테스트 클라이언트"] = skipped.get("테스트 클라이언트", 0) + 1
+                continue
             if not str(detail.get("decision", "")).strip():
                 skipped["결정 없음"] = skipped.get("결정 없음", 0) + 1
                 continue

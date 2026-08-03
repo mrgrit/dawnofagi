@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from dawn_core.eg import judgment
 from dawn_core.eg.store import EGStore
 
@@ -200,3 +199,40 @@ def test_EG_가_없어도_감사는_성공한다(tmp_path, monkeypatch):
                                    decision="approved", note="x")
     assert rec["action"] == "hitl.decide"
     assert (tmp_path / "var" / "groupware" / "audit.jsonl").is_file()
+
+
+# ── 테스트 잔재가 말뭉치에 들어오지 않는다 ────────────────────────────────
+
+
+def test_test_client_audit_lines_are_not_judgments():
+    """`conftest.py` 는 테스트 중 **적재**를 끄지만, 백필은 그 스위치가 생기기
+    전의 이력을 읽는다. 실측(2026-08-03): 백필이 가져온 3건이 전부 픽스처였고
+    사유가 "승인" · "범위 밖" · "P4 자기검증" 이었다 — 감사 줄의 `ip` 가 전부
+    `testclient`. 스위치는 앞을 막고 이 검사는 뒤를 막는다.
+    """
+    rec = {"action": "portal.order.decide", "actor": "lead-ax", "ip": "testclient",
+           "target": "work_order:208", "at": "2026-08-03T12:50:03",
+           "detail": {"decision": "approved", "note": "승인"}}
+    assert not judgment.is_judgment(rec), "테스트 클라이언트가 판단으로 셌다"
+
+    human = {**rec, "ip": "192.168.0.50"}
+    assert judgment.is_judgment(human), "사람의 요청까지 막으면 안 된다"
+
+
+def test_backfill_counts_what_it_skipped_and_why(tmp_path):
+    """무엇을 왜 건너뛰었는지 안 보이면 "0건"이 정상인지 고장인지 모른다."""
+    import json as _json
+
+    audit = tmp_path / "audit.jsonl"
+    audit.write_text("\n".join(_json.dumps(r, ensure_ascii=False) for r in [
+        {"action": "portal.order.decide", "actor": "a", "ip": "testclient",
+         "target": "w:1", "at": "2026-08-03T00:00:00",
+         "detail": {"decision": "approved", "note": "승인"}},
+        {"action": "portal.order.decide", "actor": "b", "ip": "10.0.0.9",
+         "target": "w:2", "at": "2026-08-03T00:00:01",
+         "detail": {"decision": "approved", "note": "예산 안이다"}},
+    ]) + "\n", encoding="utf-8")
+
+    res = judgment.backfill(None, audit, apply=False)
+    assert res["recorded"] == 1, "사람 판단만 세야 한다"
+    assert res["skipped"].get("테스트 클라이언트") == 1
