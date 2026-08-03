@@ -15,6 +15,7 @@ import re
 import secrets
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from dawn_core.paths import Paths
@@ -960,3 +961,45 @@ def test_saving_a_widened_gate_is_refused_through_http(portal, users, root):
     assert r.status_code == 400
     assert "저장하지 않았다" in r.text
     assert p.read_text(encoding="utf-8") == before, "파일이 바뀐 채 남았다"
+
+
+def test_login_fixture_does_not_leave_real_passwords_scrambled(root):
+    """`_login()` 은 호출마다 실 계정의 비밀번호를 임의로 바꾼다 — 픽스처에
+    상수를 두면 커밋된 자격증명이 되므로 그 판단은 옳다. 다만 **되돌려야 한다.**
+
+    실측(2026-08-03): `pytest` 한 번에 `admin` 포함 7개 계정이 아무도 모르는
+    값이 되어 운영자가 그룹웨어에 로그인하지 못했다. 테스트는 통과하는데
+    시스템은 못 쓰는 상태다.
+
+    복원은 세션 종료 시점이라 여기서 결과를 볼 수는 없다. 대신 **장치가 걸려
+    있는지**를 본다 — 이게 빠지면 조용히 다시 망가진다.
+    """
+    from dawn_core import testsupport
+
+    users = root / "var" / "groupware" / "users.json"
+    assert any((root / rel) == users for rel in testsupport.RESTORE), \
+        "계정 저장소가 복원 대상에 없다"
+
+    # rootdir 이 이 패키지로 잡혀도 로드되는 conftest 가 있어야 한다 —
+    # 저장소 루트에만 두면 `pytest apps/groupware` 에서 보호가 사라진다.
+    assert (Path(__file__).parent / "conftest.py").is_file(), \
+        "이 패키지에 conftest 가 없다 — 실행 방법에 따라 보호가 꺼진다"
+
+
+def test_restore_puts_the_file_back(tmp_path):
+    from dawn_core import testsupport
+
+    p = tmp_path / "var" / "groupware" / "users.json"
+    p.parent.mkdir(parents=True)
+    p.write_text('{"admin": "원본"}', encoding="utf-8")
+
+    saved = {p: p.read_bytes()}
+    p.write_text('{"admin": "테스트가 덮어씀"}', encoding="utf-8")
+    assert testsupport.restore(saved) == [str(p)]
+    assert p.read_text(encoding="utf-8") == '{"admin": "원본"}'
+
+    # 테스트가 만든 파일은 지운다
+    made = tmp_path / "made.json"
+    made.write_text("x", encoding="utf-8")
+    testsupport.restore({made: None})
+    assert not made.exists()
