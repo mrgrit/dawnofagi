@@ -104,6 +104,29 @@
     background:rgba(7,10,14,.95);border:1px solid var(--line);border-radius:4px;
     padding:5px 11px;color:var(--dim);display:none}
   #zoombar{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:5px}
+
+  /* 에이전트 대화 — 데스크 뷰에서만 뜬다. 캔버스 위에 얹는 HTML 오버레이다
+     (캔버스에 입력창을 그릴 수는 없다). */
+  #chat{display:none;position:absolute;right:12px;bottom:12px;width:380px;max-height:62%;
+    flex-direction:column;background:var(--panel);border:1px solid var(--line);
+    border-radius:6px;overflow:hidden;z-index:6}
+  #chat header{padding:7px 10px;border-bottom:1px solid var(--line);background:var(--panel2);
+    display:flex;align-items:center;gap:8px;font-size:12px}
+  #chat header b{color:var(--acc)}
+  #chat-log{flex:1;overflow:auto;padding:9px 10px;display:flex;flex-direction:column;gap:8px}
+  #chat-log .me{align-self:flex-end;background:#1b2733;padding:5px 9px;border-radius:5px;
+    max-width:88%;white-space:pre-wrap}
+  #chat-log .ag{background:var(--panel2);border-left:2px solid var(--acc);padding:6px 9px;
+    white-space:pre-wrap;font-size:12px;line-height:1.6}
+  #chat-log .meta{color:var(--dim);font-size:10.5px;margin-top:-4px}
+  #chat-log .err{color:var(--bad);font-size:11.5px;white-space:pre-wrap}
+  #chat-log .wait{color:var(--dim);font-size:11.5px}
+  #chat-in{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+  #chat-q{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:6px 8px;border-radius:4px;font:inherit;font-size:12px}
+  #chat-send{background:var(--acc);border:0;color:#05100e;padding:6px 12px;border-radius:4px;
+    font:inherit;font-weight:bold;cursor:pointer}
+  #chat-send:disabled{opacity:.45;cursor:default}
 </style>
 </head>
 <body>
@@ -130,6 +153,15 @@
       <div id="legend"></div>
       <div id="tip"></div>
       <div id="toast"></div>
+      <div id="chat">
+        <header>대화 · <b id="chat-who"></b>
+          <span style="margin-left:auto;color:var(--dim)">읽기 전용 — 도구 없음</span></header>
+        <div id="chat-log"></div>
+        <div id="chat-in">
+          <input id="chat-q" placeholder="이 에이전트에게 묻기 (자기 trace·게이트·EG 를 근거로 답한다)">
+          <button id="chat-send">보내기</button>
+        </div>
+      </div>
     </div>
     <aside id="side"></aside>
   </main>
@@ -341,12 +373,24 @@ function loungeSlot(a){
 
 /* ── 시계 → 목표 위치 (여기가 유일한 진실) ───────────────────────────── */
 
+/* 자산 접촉은 **순간이다.** 실측: 타임라인 4944초 위에서 한 번의 접촉이
+   0.014ms ~ 9ms — 5억분의 1이라 어떤 배속에서도 한 프레임도 안 걸린다.
+   그래서 짧은 스팬은 최소 구간만큼 늘려 잡는다. 접촉을 길게 만드는 게 아니라
+   **보이게 하는 것**이고, 늘린 뒤엔 원래대로 꺼진다.
+   이 보정을 segAt 안에 두는 게 중요하다 — 아바타 위치·원격선·조명이 모두
+   segAt 에서 파생되므로, 여기서 한 번 맞추면 셋이 저절로 같은 시각을 본다. */
+function holdNs(){
+  const w = (S.state && S.state.window) || {};
+  const span = Math.max(1, (w.end_ns || 0) - (w.start_ns || 0));
+  return Math.max(2e9, span * 0.006);
+}
+
 function segAt(agentId, t){
-  const occ = S.state.occupancy;
+  const occ = S.state.occupancy, hold = holdNs();
   let best = null;
   for(const s of occ){
     if(s.agent_id !== agentId) continue;
-    if(s.start_ns <= t && t < Math.max(s.end_ns, s.start_ns+1)){
+    if(s.start_ns <= t && t < Math.max(s.end_ns, s.start_ns + hold)){
       if(!best || s.start_ns >= best.start_ns) best = s;      // 겹치면 안쪽 스팬이 이긴다
     }
   }
@@ -664,10 +708,24 @@ function drawSectors(lv, alpha){
       const gx = sc.x + 0.4 + (j%3)*1.5, gy = sc.y + 0.35 + Math.floor(j/3)*1.15;
       if(gy > sc.y + sc.d - 2.0) return;
       const c = IRR_C[as.irreversibility] || "#5b6b7d";
-      furniture(as.kind, gx, gy, lv.level, c);
-      if(named)
-        label(as.name, P(gx+0.4, gy+0.75, lv.level, 2 + (j%3)*9), shade(c, 1.55),
-              9.5*Math.max(.9, S.cam.z));
+      // 접촉의 절반 이상은 **원격**이다(자리에 앉은 채 다른 방 자산을 쓴다).
+      // 둘을 같은 색으로 켜면 아무도 없는 방에 불만 들어와 어긋나 보인다.
+      const mode = S.lit && S.lit.assets.get(as.id);   // "here" | "remote" | undefined
+      const lit = !!mode;
+      const warm = mode === "here" ? "255,214,140" : "126,200,227";   // 방문 / 원격
+      furniture(as.kind, gx, gy, lv.level, lit ? shade(c, mode === "here" ? 2.0 : 1.6) : c);
+      if(lit){
+        const lp = P(gx + 0.4, gy + 0.4, lv.level, 7);
+        S.assetPos[as.id] = lp;                  // 원격선이 여기를 겨눈다
+        ctx.fillStyle = "rgba(" + warm + ",.95)";
+        ctx.beginPath(); ctx.arc(lp.x, lp.y, 3.0 * Math.max(.8, S.cam.z), 0, 6.2832); ctx.fill();
+        ctx.fillStyle = "rgba(" + warm + ",.16)";
+        ctx.beginPath(); ctx.arc(lp.x, lp.y, 9.0 * Math.max(.8, S.cam.z), 0, 6.2832); ctx.fill();
+      }
+      if(named || lit)
+        label(as.name, P(gx+0.4, gy+0.75, lv.level, 2 + (j%3)*9),
+              lit ? (mode === "here" ? "#ffd68c" : "#7ec8e3") : shade(c, 1.55),
+              9.5*Math.max(.9, S.cam.z), undefined, lit ? "bold" : undefined);
     });
     if(detail() && z.assets.length)
       label("자산 " + z.assets.length + (z.entries ? " · 진입 " + z.entries + "회" : "") +
@@ -696,8 +754,10 @@ function drawSectors(lv, alpha){
 function drawTeams(lv){
   lv.teams.forEach(is => {
     const t = is.t, live = t.runs > 0;
+    const on = !!(S.lit && S.lit.teams.has(t.team_id));   // 지금 자리에 앉아 있나
     slab(is.x-0.2, is.y, is.w+0.4, is.d-0.4, lv.level, 0.45,
-         live ? "#28343f" : "#212a34", "#384654");
+         on ? "#3c4f60" : (live ? "#28343f" : "#212a34"),
+         on ? "#8aa0b4" : "#384654");
     box(is.x-0.2, is.y, 0.16, is.d-0.4, 13, lv.level, "#3a4757", "#28323d", "#1f2831"); // 칸막이
     desk(is.x, is.y+1.4, lv.level, lv.f.color);                 // 두 자리
     desk(is.x+1.5, is.y+1.4, lv.level, lv.f.color);
@@ -777,7 +837,10 @@ function drawPeople(lv, alpha){
     if(seg0 && seg0.remote_zone){
       const sc = lv.sectors && lv.sectors.find(x => x.z.short === seg0.remote_zone);
       if(sc){
-        const to = P(sc.x + sc.w/2, sc.y + sc.d - 0.6, lv.level, 6);
+        // 켜진 자산이 있으면 거기를 겨눈다 — 방 중앙을 가리키면 어느 집기를
+        // 만지는지 알 수 없다. 자산이 화면에 없을 때만 방 중앙으로 떨어진다.
+        const to = (seg0.asset && S.assetPos && S.assetPos[seg0.asset])
+                 || P(sc.x + sc.w/2, sc.y + sc.d - 0.6, lv.level, 6);
         ctx.strokeStyle = "#4a8ba3"; ctx.lineWidth = Math.max(1, 1.2*S.cam.z);
         ctx.globalAlpha = .55;
         ctx.beginPath(); ctx.moveTo(pt.x, pt.y - 14*S.cam.z); ctx.lineTo(to.x, to.y); ctx.stroke();
@@ -1218,18 +1281,87 @@ function drawDesk(w, h){
   });
 }
 
+
+/* ── 점등 ──────────────────────────────────────────────────────────────
+   사람이 들어가 있는 방과 앉아 있는 자리에 불이 켜진다. 빠지면 꺼진다.
+   판정 근거는 시계(S.clock) 하나다 — 누적 실행횟수가 아니라 **지금** 있는가. */
+/* 조명은 아바타와 **같은 출처**에서 나온다. S.pos[].seg 는 applyTargets() 가
+   segAt() 으로 채운 값이라, 사람이 서 있는 곳과 불이 켜진 곳이 어긋날 수 없다. */
+function litNow(){
+  const assets = new Map(), teams = new Set();
+  for(const id in S.pos){
+    const g = S.pos[id].seg;
+    if(!g) continue;                            // 대기실 — 아무 데도 안 켠다
+    if(g.asset) assets.set(g.asset, g.kind === "work" ? "here" : "remote");
+    if(g.kind !== "work") teams.add(agentTeam(id));
+  }
+  return { assets, teams };
+}
+
+function agentTeam(agentId){
+  const a = (S.state.agents || []).find(x => x.agent_id === agentId);
+  return a ? a.team : "";
+}
+
+/* ── 에이전트 대화 ─────────────────────────────────────────────────────
+   POST /api/agent/chat. 모델 호출이라 분 단위로 걸릴 수 있어 대기표시를 둔다. */
+function renderChat(){
+  const box = document.getElementById("chat");
+  if(!box) return;
+  if(S.view !== "desk" || !S.agent){ box.style.display = "none"; return; }
+  const a = S.state.agents.find(x => x.agent_id === S.agent);
+  if(S.chatFor !== S.agent){                 // 다른 에이전트를 열면 기록을 비운다
+    document.getElementById("chat-log").innerHTML = "";
+    S.chatFor = S.agent;
+  }
+  box.style.display = "flex";
+  document.getElementById("chat-who").textContent = (a && a.name) || S.agent;
+}
+
+async function sendChat(){
+  const inp = document.getElementById("chat-q");
+  const q = (inp.value || "").trim();
+  if(!q || S.chatBusy) return;
+  const log = document.getElementById("chat-log"), btn = document.getElementById("chat-send");
+  S.chatBusy = true; btn.disabled = true; inp.value = "";
+  log.insertAdjacentHTML("beforeend",
+    '<div class="me">' + esc(q) + '</div><div class="wait">응답 대기…</div>');
+  log.scrollTop = log.scrollHeight;
+  try{
+    const r = await fetch("/api/agent/chat", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ agent_id:S.agent, question:q }) });
+    const d = await r.json();
+    const w = log.querySelector(".wait"); if(w) w.remove();
+    if(d.error){
+      log.insertAdjacentHTML("beforeend", '<div class="err">' + esc(d.error) + '</div>');
+    }else{
+      const ev = d.evidence || {}, hits = ev.eg_hits || [];
+      log.insertAdjacentHTML("beforeend",
+        '<div class="ag">' + esc(d.answer || "") + '</div>' +
+        '<div class="meta">' + esc((d.provider||"") + " " + (d.model||"")) +
+        ' · 실행 ' + (ev.runs||0) + '건 · EG ' + hits.length + '건</div>');
+    }
+  }catch(e){
+    const w = log.querySelector(".wait"); if(w) w.remove();
+    log.insertAdjacentHTML("beforeend", '<div class="err">' + esc(String(e)) + '</div>');
+  }
+  S.chatBusy = false; btn.disabled = false; log.scrollTop = log.scrollHeight;
+}
+
 /* ── 렌더 ─────────────────────────────────────────────────────────────── */
 
 function draw(){
   if(!S.state) return;
   const {w,h} = fit();
   S.hit = [];
+  S.assetPos = {}; S.lit = litNow();          // 이번 프레임의 점등 상태
   ctx.fillStyle = "#070a0e"; ctx.fillRect(0,0,w,h);
   if(S.view === "building") drawBuilding(w,h);
   else if(S.view === "floor") drawFloor(w,h);
   else if(S.view === "room") drawRoom(w,h);
   else drawDesk(w,h);
-  renderCrumb(); renderSide(); renderLegend(); renderStats();
+  renderCrumb(); renderSide(); renderLegend(); renderStats(); renderChat();
 }
 
 function renderStats(){
@@ -1856,6 +1988,10 @@ function zoomAt(f, mx, my){
   draw();
 }
 
+document.getElementById("chat-send").onclick = sendChat;
+document.getElementById("chat-q").addEventListener("keydown", e => {
+  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); sendChat(); }
+});
 document.getElementById("btn-zin").onclick = () => zoomAt(1.25);
 document.getElementById("btn-zout").onclick = () => zoomAt(0.8);
 document.getElementById("btn-fit").onclick = () => { fitCam(); draw(); };

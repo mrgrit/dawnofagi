@@ -362,6 +362,43 @@ def cmd_serve(args) -> int:
             except Exception as exc:                   # 콘솔은 죽지 않는다
                 self._fail(exc)
 
+        def do_POST(self):
+            """에이전트와의 읽기 전용 대화. 도구 없이 모델만 태운다.
+
+            ThreadingHTTPServer 라 대화가 오래 걸려도 다른 요청을 막지 않는다 —
+            모델 호출이 분 단위로 갈 수 있어서 이 전제가 중요하다.
+            """
+            try:
+                if need_auth:
+                    v = webauth.check(root, self.headers.get("Cookie", ""))
+                    if not v.ok:
+                        self._deny(v)
+                        return
+                if not self.path.startswith("/api/agent/chat"):
+                    self.send_error(404)
+                    return
+                from dawn_aoc import converse as conv
+
+                n = int(self.headers.get("Content-Length", "0") or 0)
+                req = json.loads(self.rfile.read(n) or b"{}")
+                try:
+                    out = conv.converse(root, req.get("agent_id", ""),
+                                        req.get("question", ""))
+                    code = 200
+                except conv.ConverseError as e:
+                    out, code = {"error": str(e)}, 400
+                except Exception as e:                 # 모델·EG 실패도 응답으로 준다
+                    out, code = {"error": f"{type(e).__name__}: {e}"}, 502
+                body = json.dumps(out, ensure_ascii=False).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as exc:
+                self._fail(exc)
+
         def _route(self):
             if self.path.startswith("/api/state"):
                 console_mod.write_state(root)          # 요청 시 갱신 (폴링 아님)
