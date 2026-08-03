@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -26,9 +27,14 @@ from typing import Any
 
 # EG ModelPolicy id → (provider, 모델 id 또는 env 키)
 MODEL_MAP: dict[str, tuple[str, str]] = {
-    "model:opus": ("anthropic", "claude-opus-5"),
-    "model:sonnet": ("anthropic", "claude-sonnet-5"),
-    "model:haiku": ("anthropic", "claude-haiku-4-5"),
+    # Claude Code 구독(헤드리스 CLI)으로 호출한다 — 종량 API 키를 쓰지 않는다.
+    # provider 를 바꿔도 EG 배정(model:opus 등)은 그대로다: 라우팅 결정은
+    # 여전히 EG 와 통제 평면이 하고, 이 표는 그 결과를 실행할 뿐이다.
+    "model:opus": ("claude-code", "opus"),
+    "model:sonnet": ("claude-code", "sonnet"),
+    "model:haiku": ("claude-code", "haiku"),
+    # 종량 API 키를 쓰는 직접 호출 경로. 배정은 없지만 코드는 남겨둔다.
+    # ("anthropic", "claude-opus-5") 처럼 되돌리면 즉시 그 경로로 돈다.
     "model:gptoss": ("ollama", "$LOCAL_LLM_MODEL"),
     "model:openlocal": ("ollama", "$LOCAL_LLM_MODEL"),
     # 판정 전용 — 피감시 모델과 **다른 모델**이어야 한다 (담합 방지).
@@ -36,7 +42,9 @@ MODEL_MAP: dict[str, tuple[str, str]] = {
     "model:judge": ("ollama", "$LOCAL_JUDGE_MODEL"),
 }
 
-CLOUD_PROVIDERS = {"anthropic"}
+# claude-code 도 호출은 Anthropic 으로 나간다. 여기 넣지 않으면
+# pol:l3-local-only 가 뚫려 L3 자산이 클라우드로 샌다.
+CLOUD_PROVIDERS = {"anthropic", "claude-code"}
 
 
 class LLMError(Exception):
@@ -166,6 +174,46 @@ class LLMClient:
             stop_reason=resp.stop_reason or "",
         )
 
+    # ── claude-code (구독 CLI, 헤드리스) ──────────────────────────────
+    # Claude Code 는 원래 도구를 든 에이전트 하네스다. 그대로 쓰면 자기 Bash/Read/
+    # Write 로 움직여서 이 회사의 gate.yaml 이 통제할 대상이 사라진다.
+    # --allowedTools "" 로 도구를 전부 떼어 순수 completion 엔드포인트로 강등한다.
+    def _call_claude_code(
+        self, model: str, system: str, prompt: str, max_tokens: int
+    ) -> Completion:
+        cli = os.getenv("CLAUDE_CLI") or os.path.expanduser("~/.local/bin/claude")
+        if not os.path.exists(cli):
+            raise LLMError(
+                f"Claude Code CLI 를 찾지 못했다: {cli} — 설치 후 로그인하거나 "
+                f"CLAUDE_CLI 로 경로를 지정하라."
+            )
+        cmd = [cli, "-p", "--output-format", "json", "--allowedTools", "", "--model", model]
+        if system:
+            cmd += ["--append-system-prompt", system]
+        try:
+            r = subprocess.run(
+                cmd, input=prompt, capture_output=True, text=True, timeout=self.timeout
+            )
+        except subprocess.TimeoutExpired as e:
+            raise LLMError(f"claude-code 응답 시간 초과 ({self.timeout}s)") from e
+        if r.returncode != 0:
+            raise LLMError(f"claude-code 종료코드 {r.returncode}: {r.stderr[:300]}")
+        try:
+            body = json.loads(r.stdout)
+        except json.JSONDecodeError as e:
+            raise LLMError(f"claude-code 응답 파싱 실패: {r.stdout[:300]}") from e
+        if body.get("is_error"):
+            raise LLMError(f"claude-code 오류: {str(body.get('result'))[:300]}")
+        usage = body.get("usage") or {}
+        return Completion(
+            text=body.get("result", ""),
+            model=model,
+            provider="claude-code",
+            input_tokens=int(usage.get("input_tokens", 0)),
+            output_tokens=int(usage.get("output_tokens", 0)),
+            stop_reason=body.get("stop_reason", ""),
+        )
+
     # ── ollama (사내 GPU) ──────────────────────────────────────────────
     def _call_ollama(self, model: str, system: str, prompt: str, max_tokens: int) -> Completion:
         base = os.getenv("LOCAL_LLM_BASE_URL", "").rstrip("/")
@@ -220,6 +268,8 @@ class LLMClient:
     ) -> Completion:
         if resolved.provider == "anthropic":
             return self._call_anthropic(resolved.model, system, prompt, max_tokens, effort)
+        if resolved.provider == "claude-code":
+            return self._call_claude_code(resolved.model, system, prompt, max_tokens)
         if resolved.provider == "ollama":
             return self._call_ollama(resolved.model, system, prompt, max_tokens)
         raise LLMError(f"알 수 없는 provider: {resolved.provider}")
@@ -229,6 +279,11 @@ class LLMClient:
         if resolved.provider == "anthropic":
             if not os.getenv("ANTHROPIC_API_KEY"):
                 return False, "ANTHROPIC_API_KEY 없음"
+            return True, ""
+        if resolved.provider == "claude-code":
+            cli = os.getenv("CLAUDE_CLI") or os.path.expanduser("~/.local/bin/claude")
+            if not os.path.exists(cli):
+                return False, f"Claude Code CLI 없음 ({cli})"
             return True, ""
         if resolved.provider == "ollama":
             base = os.getenv("LOCAL_LLM_BASE_URL", "").rstrip("/")
