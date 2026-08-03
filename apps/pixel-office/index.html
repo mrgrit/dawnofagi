@@ -1340,7 +1340,8 @@ async function sendChat(){
       log.insertAdjacentHTML("beforeend",
         '<div class="ag">' + esc(d.answer || "") + '</div>' +
         '<div class="meta">' + esc((d.provider||"") + " " + (d.model||"")) +
-        ' · 실행 ' + (ev.runs||0) + '건 · EG ' + hits.length + '건</div>');
+        ' · 실행 ' + (ev.runs||0) + '건 · EG ' + hits.length + '건'
+        + ' · 판례 ' + ((ev.precedents||[]).length) + '건</div>');
     }
   }catch(e){
     const w = log.querySelector(".wait"); if(w) w.remove();

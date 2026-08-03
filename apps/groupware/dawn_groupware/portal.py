@@ -197,6 +197,7 @@ def _sidebar(request: Request, user: User, current: str) -> Safe:
         ("/directory", "구성원", "portal.view", None),
         ("관리", "", "", None),
         ("/audit", "감사 로그", "portal.view", None),
+        ("/judgments", "내 판단", "portal.view", None),
         ("/admin/users", "계정", "admin", None),
     ]
     out = []
@@ -613,10 +614,14 @@ async def approval_decide(request: Request) -> Response:
                       join([h1("이미 판정된 요청이다"), div(str(exc), class_="flash warn"),
                             p(a("← 승인 큐", href="/approvals"))]), status=409)
 
+    # `decision` 은 위쪽 "권한 없음" 감사 줄과 이 줄을 가르는 표시다. 거기엔
+    # 사유가 있어도 사람이 누른 적이 없다 — 그걸 판단으로 세면 트윈은
+    # "이 사람은 거부한다"를 배운다(누를 기회조차 없었는데).
     _audit(request).write("hitl.decide", actor=user.username, target=aid,
                           result=ap.status, ip=_ip(request), skill=ap.skill,
                           agent_id=ap.agent_id, agent_org=agent_org,
-                          severity=ap.severity, assets=ap.assets, note=note)
+                          severity=ap.severity, assets=ap.assets, note=note,
+                          decision=ap.status)
     return RedirectResponse(f"/approvals/{aid}", status_code=303)
 
 
@@ -818,7 +823,7 @@ async def control_save(request: Request) -> Response:
     _audit(request).write("control.save", actor=user.username,
                           target=f"{kind}/{ident}", result="ok", ip=_ip(request),
                           reason=reason, validation=res.validation,
-                          lines=len(res.diff))
+                          lines=len(res.diff), decision="edited", kind=kind)
     return _shell(request, user, "저장됨", join([
         h1("저장됨"),
         div(f"{kind}/{ident} — {res.validation}", class_="flash ok"),
@@ -871,7 +876,7 @@ async def control_agents(request: Request) -> Response:
 
     _audit(request).write(f"control.agent.{op}", actor=user.username, target=aid,
                           result="ok", ip=_ip(request), reason=reason,
-                          validation=res.validation)
+                          validation=res.validation, decision=op, op=op)
     return _shell(request, user, "반영됨", join([
         h1("반영됨"),
         div(f"{aid} — {res.validation}", class_="flash ok"),
@@ -1030,7 +1035,8 @@ async def eg_node_post(request: Request) -> Response:
     _audit(request).write("eg.update", actor=user.username, target=node_id,
                           result="ok" if res.ok else "rejected", ip=_ip(request),
                           reason=reason, kind=kind, diff=res.diff,
-                          snapshot=res.snapshot, error=res.error)
+                          snapshot=res.snapshot, error=res.error,
+                          decision="edited" if res.ok else "", node_id=node_id)
 
     body = join([
         h1("EG 변경 " + ("반영됨" if res.ok else "거부됨")),
@@ -1388,9 +1394,12 @@ async def order_decide(request: Request) -> Response:
     status = "rejected" if not approve else (
         "approved" if workintake.next_approver(chain, after) is None else "pending_approval")
     store.append_work_order_approval(wid, entry, status=status)
+    # note 를 함께 남긴다 — 결재 사유는 이미 받고 있었는데 감사에 안 넘겼다.
+    # 사유 없는 판단은 P8 이 세지 않는다(결정만으로는 왜 그랬는지 모른다).
     _audit(request).write("portal.order.decide", actor=user.username,
                           target=f"work_order:{wid}", ip=_ip(request),
-                          decision=entry["decision"], step=entry["step"], status=status)
+                          decision=entry["decision"], step=entry["step"],
+                          status=status, note=str(form.get("note", ""))[:2000])
     return RedirectResponse(f"/orders/{wid}", status_code=303)
 
 
@@ -1704,6 +1713,90 @@ async def audit_view(request: Request) -> Response:
     return _shell(request, user, "감사 로그", body, current="/audit")
 
 
+# ── 판단 이력 (P8 수집 계층) ─────────────────────────────────────────────
+
+
+def _judgment_store(request: Request):
+    """판단은 EG 에 산다. 없으면 None — 화면이 조용히 비면 안 되므로 알려준다."""
+    return request.app.state.eg
+
+
+@require("portal.view")
+async def judgments_view(request: Request) -> Response:
+    """내가 내린 판단들.
+
+    **기본이 본인 것만이다.** 한 사람의 판단 모음은 그 사람의 판단 모델이고,
+    그건 개인정보(L3)다. 남의 것을 훑어보는 화면이 아니다 — 감사 로그(`/audit`)가
+    "무슨 일이 있었나"를 답하는 자리고, 여기는 "나에 대해 무엇이 쌓였나"를
+    본인이 확인하는 자리다.
+    """
+    from dawn_core.eg import judgment as jd
+
+    user: User = request.state.user
+    eg = _judgment_store(request)
+    if eg is None:
+        return _shell(request, user, "판단 이력", join([
+            h1("판단 이력"),
+            div("EG 가 없다 — make eg-load 후에 볼 수 있다.", class_="flash bad"),
+        ]), current="/judgments")
+
+    rows_data = jd.judgments(eg, actor=user.username)
+    rows = [tr(th("시각"), th("경로"), th("결정"), th("대상"), th("사유"))]
+    for n in rows_data:
+        c = n.content
+        sit = c.get("situation") or {}
+        tgt = ", ".join(sit.get("assets") or []) or c.get("target", "")
+        rows.append(tr(
+            td(small(c.get("at", "").replace("T", " ")[:19], class_="mono")),
+            td(code(c.get("source", ""))),
+            td(span(c.get("decision", ""), class_="tag " +
+                    ("ok" if c.get("decision") in ("approved", "edited") else "bad"))),
+            td(small(tgt, class_="dim")),
+            td(small(c.get("reason", "")[:120], class_="dim")),
+        ))
+
+    body = join([
+        h1("내 판단 이력"),
+        p("사유가 붙는 결정을 내릴 때마다 자동으로 쌓인다. 따로 입력하지 않는다.",
+          class_="lede"),
+        div("이 기록은 개인정보(L3)다. 클라우드 모델에 보내지 않는다. "
+            "언제든 지울 수 있고, 지워도 감사 로그는 남는다 — 그건 법적 기록이다.",
+            class_="flash warn"),
+        table(*rows) if rows_data else p(
+            "아직 없다. 승인·결재·EG 조정을 사유와 함께 하면 여기 쌓인다.",
+            class_="empty"),
+        Safe(f'<form method="post" action="/judgments" '
+             f'onsubmit="return confirm(\'판단 {len(rows_data)}건을 지운다. '
+             f'되돌릴 수 없다.\')">') if rows_data else None,
+        csrf_field(request) if rows_data else None,
+        Safe('<button class="btn bad" type="submit">내 판단 이력 전부 지우기</button>'
+             '</form>') if rows_data else None,
+    ])
+    return _shell(request, user, "판단 이력", body, current="/judgments")
+
+
+@require("portal.view")
+async def judgments_post(request: Request) -> Response:
+    """본인 판단 삭제. **남의 것은 지울 수 없다** — actor 를 폼에서 받지 않는다."""
+    from dawn_core.eg import judgment as jd
+
+    user: User = request.state.user
+    form = await request.form()
+    if not check_csrf(request, form):
+        return RedirectResponse("/judgments", status_code=303)
+
+    eg = _judgment_store(request)
+    n = jd.forget(eg, user.username) if eg is not None else 0
+    _audit(request).write("judgment.forget", actor=user.username,
+                          target=user.username, result="ok", ip=_ip(request),
+                          count=n)
+    return _shell(request, user, "판단 이력", join([
+        h1("지웠다"),
+        div(f"판단 {n}건을 삭제했다. 감사 로그는 그대로 남는다.", class_="flash ok"),
+        p(a("← 판단 이력", href="/judgments")),
+    ]), current="/judgments")
+
+
 # ── 계정 관리 ────────────────────────────────────────────────────────────
 
 
@@ -1884,6 +1977,8 @@ routes = [
     Route("/calendar", calendar_post, methods=["POST"]),
     Route("/directory", directory),
     Route("/audit", audit_view),
+    Route("/judgments", judgments_view, methods=["GET"]),
+    Route("/judgments", judgments_post, methods=["POST"]),
     Route("/admin/users", admin_users, methods=["GET"]),
     Route("/admin/users", admin_users_post, methods=["POST"]),
     Route("/admin/users/{username}", admin_user_edit, methods=["GET"]),

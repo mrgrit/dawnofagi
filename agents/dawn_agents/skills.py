@@ -199,10 +199,31 @@ def build_default_registry(catalog, *, root: Path, eg_store=None,
             return SkillResult(False, "", "EG 스토어가 없다 — make eg-load")
         hits = eg_store.search(query, type=type, limit=limit)
         lines = [f"{h.id} [{h.type}] {h.name}" for h in hits]
+
+        # **판례를 함께 준다.** 지금까지 여기서 나오는 것은 페르소나 — 사람이
+        # 적어 둔 추상 원칙뿐이었다. 원칙은 한 번 쓰이고 낡는데, 실제로 어떻게
+        # 판단해 왔는지는 볼 방법이 없었다. 그래서 "이 회사는 이런 걸 어떻게
+        # 보나"에 답하려면 착수 전에 판례가 필요하다.
+        #
+        # `type` 을 지정한 조회에는 붙이지 않는다 — 특정 타입을 달라고 한
+        # 요청에 다른 타입을 섞어 주면 호출자의 계약을 깬다.
+        prec = []
+        if not type:
+            from dawn_core.eg import judgment
+            prec = judgment.precedents(eg_store, query, limit=3)
+            if prec:
+                lines.append("")
+                lines.append("판례 (사람이 실제로 내린 결정):")
+                for j in prec:
+                    c = j.content
+                    lines.append(f"  {j.id} {c.get('decision','')} — "
+                                 f"{c.get('reason','')[:80]}")
+
         # **무엇을 읽었는지**를 남긴다. 개수만 남기면 "이 판단이 무엇에 근거했나"를
         # 사후에 재구성할 수 없다 — EG 축적 루프가 감사 불가능해진다.
         return SkillResult(True, "\n".join(lines) or "(없음)",
-                           meta={"hits": len(hits), "hit_ids": [h.id for h in hits]})
+                           meta={"hits": len(hits), "hit_ids": [h.id for h in hits],
+                                 "precedents": [j.id for j in prec]})
 
     def eg_record(kind: str, summary: str, detail: str = "") -> SkillResult:
         if eg_store is None:

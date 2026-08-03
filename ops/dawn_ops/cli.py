@@ -6,6 +6,7 @@
     dawn-ops tenant            멀티테넌트 준비 점검
     dawn-ops status            전 계층 현황 한 장
     dawn-ops kpi               자율화 A1 운영 KPI (관제 대시보드)
+    dawn-ops purpose           승인 큐 목적 태그 백필 (기본 미적용)
 """
 
 from __future__ import annotations
@@ -235,6 +236,70 @@ def cmd_kpi(args) -> int:
     return aoc_kpi(args)
 
 
+# ── 목적 태그 백필 ──────────────────────────────────────────────────────
+
+
+def _purpose_resolver(root: Path):
+    """증거로 목적을 찾는 해석기 — 케이스 먼저, 없으면 트레이스 레이크.
+
+    `hitl.py` 는 `dawn_aoc` 를 임포트할 수 없다(aoc → agents 방향이라 반대로
+    부르면 순환이다). 그래서 조회는 둘 다 볼 수 있는 여기서 만들어 주입한다.
+    """
+    from dawn_aoc.collect import TraceLake
+    from dawn_aoc.triage import CaseStore
+
+    cases = {}
+    try:
+        for c in CaseStore(root).list():
+            cases[c.id] = getattr(c, "purpose", "")
+    except Exception:
+        pass
+
+    runs: dict[str, str] = {}
+    try:
+        lake = TraceLake(root)
+        for tid in lake.trace_ids():
+            for r in lake.normalize(tid):
+                if getattr(r, "purpose", "") not in ("", "unknown"):
+                    runs[r.trace_id] = r.purpose
+    except Exception:
+        pass
+
+    def resolve(ap):
+        cid = (ap.args or {}).get("case_id", "")
+        if cid and cases.get(cid) not in (None, "", "unknown"):
+            return cases[cid], f"케이스 {cid}"
+        if ap.trace_id in runs:
+            return runs[ap.trace_id], f"트레이스 레이크 {ap.trace_id[:12]}"
+        return "", ""
+
+    return resolve
+
+
+def cmd_purpose(args) -> int:
+    from dawn_agents.hitl import ApprovalQueue
+
+    root = _root()
+    q = ApprovalQueue(root)
+    res = q.backfill_purpose(resolver=_purpose_resolver(root), apply=args.apply)
+    if args.json:
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    head = "적용" if res["applied"] else "미적용 (--apply 로 반영)"
+    print(_t(f"승인 큐 목적 백필 — {head}", B))
+    print(f"  전체 {res['total']}건 · 대상 {len(res['changed'])}건 "
+          f"· 판별 불가 {len(res['unresolved'])}건")
+    for k, v in sorted(res["by_purpose"].items()):
+        print(f"    {k:<8} {v:4d}")
+    for r in res["unresolved"][:10]:
+        print(_t(f"    ? {r['id']}  {r['skill']}  trace={r['trace_id'][:16]}", Y))
+    # 백필의 목적은 이 숫자 하나다 — 사람이 실제로 봐야 할 것이 몇 건인가.
+    work = len(q.pending(purpose="work"))
+    print(_t(f"  실업무 대기: {work}건", G if work else D))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dawn-ops", description="통합·검증·운영")
     s = p.add_subparsers(dest="cmd", required=True)
@@ -268,6 +333,11 @@ def build_parser() -> argparse.ArgumentParser:
     x = s.add_parser("kpi", help="자율화 A1 운영 KPI")
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_kpi)
+
+    x = s.add_parser("purpose", help="승인 큐 목적 태그 백필")
+    x.add_argument("--apply", action="store_true", help="실제로 쓴다 (기본은 계획만)")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_purpose)
     return p
 
 

@@ -21,6 +21,30 @@ from typing import Any
 
 STATUSES = ("pending", "approved", "denied", "expired")
 
+# 큐에 실제로 남는 목적. 워커의 RUN_PURPOSES 에 "test" 를 더한 것이다 —
+# 워커가 test 목적으로 도는 일은 없어야 하지만, 테스트 픽스처가 **실 큐에**
+# 레코드를 남기는 일은 실제로 일어난다(실측 26건, apps/groupware/tests).
+# 그걸 unknown 으로 두면 사람이 볼 실업무와 섞인다.
+QUEUE_PURPOSES = ("work", "drill", "redteam", "demo", "test")
+
+# 이 저장소가 **스스로 짓는** 합성 트레이스 접두어. 추론이 아니라 출처가 있다 —
+# 바깥에서 들어온 트레이스에는 이런 접두어가 없으므로 여기 걸리지 않는다.
+SYNTHETIC_TRACE_PREFIXES: tuple[tuple[str, str, str], ...] = (
+    ("rehearsal-", "drill", "ops/dawn_ops/rehearsal.py"),
+    ("redteam-", "redteam", "ops/dawn_ops/redteam.py"),
+    ("demo-", "demo", "scripts/lib/demo_two_orgs.py"),
+    ("p4-test", "test", "apps/groupware/tests/test_web.py"),
+    ("test-", "test", "테스트 픽스처"),
+)
+
+
+def purpose_from_trace_id(trace_id: str) -> tuple[str, str]:
+    """트레이스 ID 만으로 목적을 판별한다. 모르면 ("", "")."""
+    for prefix, purpose, origin in SYNTHETIC_TRACE_PREFIXES:
+        if trace_id.startswith(prefix):
+            return purpose, f"트레이스 접두어 {prefix!r} ({origin})"
+    return "", ""
+
 
 @dataclass
 class Approval:
@@ -164,6 +188,53 @@ class ApprovalQueue:
         for ap in self.list("pending"):
             out[ap.purpose] = out.get(ap.purpose, 0) + 1
         return out
+
+    def backfill_purpose(self, *, resolver=None, apply: bool = False) -> dict[str, Any]:
+        """`purpose == "unknown"` 인 과거 요청에 목적을 채운다.
+
+        왜 필요한가 — 목적 태그는 2026-08-02 에 들어왔고 그 전 레코드는 전부
+        unknown 이다(실측 211/212). 화면은 `pending(purpose="work")` 로 실업무만
+        걸러 주지만, **걸러낼 근거가 레코드에 없으면 필터가 아무 일도 하지 않는다.**
+        태그를 넣어 놓고 백필을 안 하면 넣은 적 없는 것과 같다.
+
+        **증거 순서로만 정한다. 추측으로 채우지 않는다:**
+
+          1. `resolver` — 케이스·트레이스 레이크 조회 (호출자가 주입한다.
+             이 모듈은 `dawn_aoc` 를 임포트할 수 없다 — aoc 가 agents 에
+             의존하므로 반대로 부르면 순환이다.)
+          2. 트레이스 접두어 — 이 저장소가 직접 지은 이름
+          3. 못 정하면 **unknown 으로 남긴다.** 틀린 태그는 필터를 조용히
+             망가뜨리므로 빈 값보다 나쁘다.
+
+        `apply=False` 면 아무것도 쓰지 않고 계획만 돌려준다.
+        """
+        changed: list[dict[str, str]] = []
+        unresolved: list[dict[str, str]] = []
+        for ap in self.list():
+            if ap.purpose in QUEUE_PURPOSES:
+                continue
+            purpose = source = ""
+            if resolver is not None:
+                purpose, source = resolver(ap)
+            if not purpose:
+                purpose, source = purpose_from_trace_id(ap.trace_id)
+            row = {"id": ap.id, "trace_id": ap.trace_id, "skill": ap.skill,
+                   "status": ap.status, "purpose": purpose, "source": source}
+            if not purpose:
+                unresolved.append(row)
+                continue
+            changed.append(row)
+            if apply:
+                ap.purpose = purpose
+                self._path(ap.id).write_text(
+                    json.dumps(ap.to_dict(), ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
+
+        by: dict[str, int] = {}
+        for r in changed:
+            by[r["purpose"]] = by.get(r["purpose"], 0) + 1
+        return {"applied": apply, "total": len(self.list()),
+                "changed": changed, "unresolved": unresolved, "by_purpose": by}
 
     def mark_run_ended(self, aid: str) -> None:
         """이 요청을 낸 run 이 끝났다 — 승인해도 집행되지 않는다는 사실을 남긴다.

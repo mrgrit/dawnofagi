@@ -174,6 +174,36 @@ def _eg_hits(store, agent_id: str, question: str, limit: int = MAX_EG_HITS) -> l
     return hits[: limit * 2]
 
 
+def _precedents(store, question: str, limit: int = 3) -> list[dict[str, str]]:
+    """사람이 실제로 내린 판단 — 페르소나(적어 둔 원칙)와 구별해서 보여준다.
+
+    이 둘이 어긋나 있으면 그게 P8 이 재려는 발산이다. 화면에 나란히 띄우는
+    이유도 그것이다: 원칙만 보면 늘 지켜지는 것처럼 보인다.
+    """
+    from dawn_core.eg import judgment
+
+    out: list[dict[str, str]] = []
+    for k in _keywords(question) or [question]:
+        for n in judgment.precedents(store, k, limit=limit):
+            if any(o["id"] == n.id for o in out):
+                continue
+            c = n.content
+            sit = c.get("situation") or {}
+            # 대상 자산을 함께 넘긴다. 없으면 에이전트가 사유 문구에서
+            # 자산을 **추정**하게 되고, 추정한 판례는 근거가 아니다.
+            out.append({"id": n.id, "actor": c.get("actor", ""),
+                        "source": c.get("source", ""),
+                        "decision": c.get("decision", ""),
+                        "reason": c.get("reason", "")[:200],
+                        "target": c.get("target", ""),
+                        "assets": list(sit.get("assets") or []),
+                        "skill": sit.get("skill", ""),
+                        "at": c.get("at", "")})
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
 # ── 프롬프트 조립 ────────────────────────────────────────────────────────
 def _fmt_runs(root: Path, runs: list[Any]) -> str:
     from dawn_aoc.console import _task_and_output
@@ -210,6 +240,19 @@ def _fmt_profile(prof) -> str:
     )
 
 
+def _fmt_precedents(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "(판례 없음 — 이 회사는 아직 비슷한 결정을 내린 적이 없다)"
+    lines = []
+    for r in rows:
+        tgt = ", ".join(r.get("assets") or []) or r.get("target", "")
+        skill = f" {r['skill']}" if r.get("skill") else ""
+        lines.append(
+            f"  - {r['at'][:10]} {r['actor']} [{r['source']}]{skill} "
+            f"→ {tgt}: {r['decision']} — {r['reason']}")
+    return "\n".join(lines)
+
+
 def _fmt_hits(hits: list[dict[str, str]]) -> str:
     if not hits:
         return "(관련 항목 없음)"
@@ -234,6 +277,7 @@ def converse(root: Path, agent_id: str, question: str, *, timeout: int = 300) ->
     runs = _recent_runs(root, agent_id)
     prof = org_profile(r["store"], r["eg_org"])
     hits = _eg_hits(r["store"], agent_id, question)
+    prec = _precedents(r["store"], question)
 
     system = (
         f"{soul}\n\n"
@@ -241,7 +285,8 @@ def converse(root: Path, agent_id: str, question: str, *, timeout: int = 300) ->
         "너는 지금 관제 콘솔에서 사람의 질문을 받고 있다. 네가 한 일과 네 권한에 대해 답하라.\n"
         "\n"
         "규칙:\n"
-        "- 근거로 주어진 것(게이트·실행기록·EG)만 가지고 답한다. 없으면 없다고 말한다.\n"
+        "- 근거로 주어진 것(게이트·실행기록·EG·판례)만 가지고 답한다. 없으면 없다고 말한다.\n"
+        "- 판례는 **사람이 실제로 내린 결정**이다. 적어 둔 원칙과 다르면 그 차이를 말하라.\n"
         "- 실행기록을 인용할 때는 trace 를 함께 밝힌다.\n"
         "- 이 대화에서 너는 도구를 쓸 수 없다. 무언가 실행해야 하는 요청이면,\n"
         "  하겠다고 답하지 말고 '이 창에서는 실행할 수 없다'고 말한 뒤 어디서 하면 되는지 알려라.\n"
@@ -253,6 +298,7 @@ def converse(root: Path, agent_id: str, question: str, *, timeout: int = 300) ->
         f"{_fmt_profile(prof)}\n\n"
         f"## 내 최근 실행 {len(runs)}건\n{_fmt_runs(root, runs)}\n\n"
         f"## 질문과 관련해 EG 에서 찾은 것\n{_fmt_hits(hits)}\n\n"
+        f"## 사람이 내린 판례\n{_fmt_precedents(prec)}\n\n"
         f"## 질문\n{question}\n"
     )
 
@@ -272,6 +318,7 @@ def converse(root: Path, agent_id: str, question: str, *, timeout: int = 300) ->
         "evidence": {
             "runs": len(runs),
             "eg_hits": hits,
+            "precedents": prec,
             "soul": bool(soul),
         },
     }

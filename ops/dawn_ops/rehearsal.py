@@ -63,9 +63,13 @@ class Rehearsal:
 def _mkrun(trace_id: str, **kw):
     from dawn_aoc.collect import Run
 
+    # 목적을 여기서 박는다. 이게 없으면 Run.purpose 가 "unknown" 으로 남고
+    # triage → Case → 승인 큐까지 그대로 따라가서 **리허설이 사람의 큐를
+    # 막는다** (실측 2303건). 백필로 뒤늦게 고칠 게 아니라 발생점에서 막는다.
     base = {"trace_id": trace_id, "agent_id": AGENT, "agent_name": "경리 처리 에이전트",
             "team": "corp-admin", "division": "corp", "eg_org": "org:ga",
             "zone": "user", "steps": 3, "chat_calls": 1, "complete": True,
+            "purpose": "drill",
             "tools_used": ["eg.search", "eg.record"]}
     base.update(kw)
     return Run(**base)

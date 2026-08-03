@@ -41,6 +41,7 @@ class AuditLog:
     """append-only 감사 로그."""
 
     def __init__(self, root: Path) -> None:
+        self.root = Path(root)
         self.path = Path(root) / "var" / "groupware" / "audit.jsonl"
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +59,31 @@ class AuditLog:
             os.write(fd, line.encode("utf-8"))
         finally:
             os.close(fd)
+        self._record_judgment(rec)
         return rec
+
+    def _record_judgment(self, rec: dict[str, Any]) -> None:
+        """결정과 사유가 둘 다 있는 줄이면 EG 에 판단으로도 남긴다 (P8 수집 계층).
+
+        **감사 줄을 먼저 쓰고 나서** 부른다. 순서가 중요하다 — 감사는 법적
+        기록이라 어떤 경우에도 실패하면 안 되고, EG 적재는 부수 효과다.
+        그래서 여기서 나는 오류는 전부 삼킨다. EG DB 가 없거나(신규 배포)
+        잠겨 있어도 그룹웨어는 계속 돌아야 한다.
+        """
+        try:
+            from dawn_core.eg import judgment
+            from dawn_core.eg.cli import db_path
+            from dawn_core.eg.store import EGStore
+            from dawn_core.paths import Paths
+
+            if not judgment.is_judgment(rec):
+                return
+            db = db_path(Paths(self.root))
+            if not db.is_file():
+                return
+            judgment.record(EGStore(db), rec)
+        except Exception:
+            pass
 
     def tail(self, limit: int = 100, *, action_prefix: str = "",
              actor: str = "") -> list[dict[str, Any]]:

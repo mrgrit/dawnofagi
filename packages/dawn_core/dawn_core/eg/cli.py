@@ -311,6 +311,52 @@ def cmd_routing(args) -> int:
     return 0
 
 
+def cmd_reindex(args) -> int:
+    """FTS 색인 재생성 — 색인 대상 필드가 늘었을 때."""
+    n = _store(args).reindex_fts()
+    print(f"노드 {n}개 재색인")
+    return 0
+
+
+def cmd_judgments(args) -> int:
+    """판단 기록 — 조회 · 복구 백필 · 본인 삭제 (P8 수집 계층)."""
+    from . import judgment
+
+    store = _store(args)
+    root = Paths(args.root).root
+
+    if args.forget:
+        n = judgment.forget(store, args.forget)
+        print(f"{args.forget} 의 판단 {n}건을 지웠다 (감사 로그는 그대로다).")
+        return 0
+
+    if args.backfill:
+        res = judgment.backfill(store, root / "var" / "groupware" / "audit.jsonl",
+                                apply=args.apply)
+        head = "적용" if res["applied"] else "미적용 (--apply 로 반영)"
+        print(f"감사 로그 백필 — {head}")
+        print(f"  훑은 줄 {res['scanned']} · 판단 {res['recorded']}건")
+        for k, v in sorted(res["skipped"].items()):
+            print(f"    건너뜀 ({k}) {v}")
+        return 0
+
+    rows = judgment.judgments(store, actor=args.actor, source=args.source)
+    if args.json:
+        print(json.dumps([{"id": n.id, **n.content} for n in rows],
+                         ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print("판단 기록이 없다. 사유가 붙는 결정이 일어나면 자동으로 쌓인다.")
+        return 0
+    for n in rows:
+        c = n.content
+        print(f"{c.get('at','')[:19]}  {c.get('actor',''):<14} "
+              f"{c.get('source',''):<13} {c.get('decision',''):<10} {c.get('target','')}")
+        print(f"    사유: {c.get('reason','')[:100]}")
+    print(f"\n총 {len(rows)}건")
+    return 0
+
+
 def cmd_snapshot(args) -> int:
     paths = Paths(args.root)
     path = take_snapshot(
@@ -373,6 +419,20 @@ def add_subparser(sub) -> None:
     p = s.add_parser("autonomy", help="자율화 게이트 필요 조합")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_autonomy)
+
+    p = s.add_parser("reindex", help="FTS 색인 재생성")
+    p.set_defaults(func=cmd_reindex)
+
+    p = s.add_parser("judgments", help="사람의 판단 기록 (P8 수집 계층)")
+    p.add_argument("--actor", default="", help="이 사람 것만 (본인 열람)")
+    p.add_argument("--source", default="",
+                   help="hitl | work_order | eg_edit | control_edit")
+    p.add_argument("--backfill", action="store_true",
+                   help="감사 로그에서 되살린다 (복구용)")
+    p.add_argument("--apply", action="store_true", help="백필을 실제로 쓴다")
+    p.add_argument("--forget", default="", help="이 사람의 판단을 지운다 (L3 권리)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_judgments)
 
     p = s.add_parser("bridge", help="통제 평면 ↔ EG 정합성 대조")
     p.add_argument("--json", action="store_true")

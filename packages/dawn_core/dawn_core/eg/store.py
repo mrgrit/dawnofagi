@@ -39,6 +39,11 @@ GOVERNANCE_NODE_TYPES = {
 }
 RUNTIME_NODE_TYPES = {"Task", "Finding", "Observation", "Skill"}
 
+# 사람의 판단 기록 (P8 수집 계층). **거버넌스가 아니다** — `loader.py` 가
+# eg-load 때 `delete_layer("governance")` 로 그 계층을 통째로 갈아엎기 때문이다.
+# 거버넌스는 YAML 에서 언제든 복원되지만 판단은 복원할 수 없다.
+JUDGMENT_NODE_TYPES = {"Judgment"}
+
 GOVERNANCE_EDGE_TYPES = {
     "PART_OF",
     "HAS_PERSONA",
@@ -54,7 +59,7 @@ GOVERNANCE_EDGE_TYPES = {
 }
 RUNTIME_EDGE_TYPES = {"PERFORMED_BY", "TOUCHED", "ABOUT", "OBSERVES", "CONSTRAINED_BY"}
 
-NODE_TYPES = GOVERNANCE_NODE_TYPES | RUNTIME_NODE_TYPES
+NODE_TYPES = GOVERNANCE_NODE_TYPES | RUNTIME_NODE_TYPES | JUDGMENT_NODE_TYPES
 EDGE_TYPES = GOVERNANCE_EDGE_TYPES | RUNTIME_EDGE_TYPES
 
 # bastion 이 이미 쓰는 타입 — 같은 DB 를 공유하므로 읽을 때 거부하면 안 된다.
@@ -223,6 +228,47 @@ class EGStore:
                 (src, dst, type, json.dumps(meta or {}, ensure_ascii=False)),
             )
             c.commit()
+
+    def reindex_fts(self) -> int:
+        """FTS 색인을 노드 테이블에서 다시 만든다. 색인 대상 필드가 늘면 필요하다.
+
+        기존 노드는 upsert 될 때만 색인이 갱신되므로, 허용 목록에 필드를
+        추가해도 이미 있는 노드는 예전 색인 그대로 남는다. 그 상태를
+        "검색이 안 된다"로 겪게 되므로 명시적으로 다시 만든다.
+        """
+        n = 0
+        with self._conn() as c:
+            c.execute("DELETE FROM nodes_fts")
+            for row in c.execute("SELECT id, type, name, content FROM nodes"):
+                try:
+                    content = json.loads(row["content"] or "{}")
+                except (ValueError, TypeError):
+                    content = {}
+                c.execute(
+                    "INSERT INTO nodes_fts (id, type, name, content_text) "
+                    "VALUES (?,?,?,?)",
+                    (row["id"], row["type"], row["name"],
+                     _fts_text(row["name"], content)),
+                )
+                n += 1
+            c.commit()
+        return n
+
+    def delete_node(self, node_id: str) -> bool:
+        """노드 하나와 그에 걸린 엣지를 지운다. 없으면 False.
+
+        판단 기록은 개인정보(L3)라 **본인이 지울 수 있어야 한다** (P8 §4-④).
+        감사 로그는 이것과 무관하게 남는다 — 그건 법적 기록이고 append-only 다.
+        """
+        with self._conn() as c:
+            cur = c.execute("SELECT 1 FROM nodes WHERE id = ?", (node_id,)).fetchone()
+            if cur is None:
+                return False
+            c.execute("DELETE FROM edges WHERE src = ? OR dst = ?", (node_id, node_id))
+            c.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+            c.execute("DELETE FROM nodes_fts WHERE id = ?", (node_id,))
+            c.commit()
+        return True
 
     def delete_layer(self, layer: str) -> int:
         """해당 layer 의 노드와 그에 연결된 엣지를 지운다 (재주입 전 정리용)."""
@@ -396,6 +442,17 @@ def _fts_text(name: str, content: dict[str, Any]) -> str:
         "source_ref",
         "model_constraint",
         "owner_org",
+        # 런타임 — `eg.record` 가 쓰는 필드. 여기 없으면 이름(=summary 앞 120자)
+        # 만 색인되어 긴 관찰은 뒷부분이 검색에 안 걸린다.
+        "summary",
+        "detail",
+        # 판단 — **사유가 핵심 검색축이다.** "이 회사는 한도 초과를 어떻게
+        # 봤나"는 사유 본문으로만 찾을 수 있다.
+        "reason",
+        "decision",
+        "tags",
+        "actor",
+        "source",
     ):
         v = content.get(key)
         if isinstance(v, str):
