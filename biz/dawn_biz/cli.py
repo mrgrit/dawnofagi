@@ -509,6 +509,75 @@ def cmd_infra(args) -> int:
     return 0
 
 
+def cmd_hire(args) -> int:
+    """작업 지시를 읽고 편성 **초안**을 만든다 (P7 — 자동 고용).
+
+    초안일 뿐이다. 본부장이 파일을 고치고 승인해야 에이전트가 생긴다 —
+    **편성은 권한을 만드는 행위**라 모델이 읽은 대로 바로 만들면 안 된다.
+    """
+    from dawn_core import hire, workintake
+
+    root = _root()
+    s2 = _store(args)
+    r = s2.work_order(args.id)
+    if r is None:
+        print(f"작업 지시 없음: {args.id}")
+        return 2
+
+    # 결재 상태 — 초안은 결재 전에도 만들 수 있다(미리 보는 게 결재에 도움이 된다).
+    # 승인(=실제 생성)만 결재를 요구한다.
+    chain = workintake.approval_chain(root, business=r["business"],
+                                      infra_tier=r["infra_tier"],
+                                      division=r["division"], origin=r["origin"])
+    decided = s2.work_order_approvals(args.id)
+    order_approved = r["status"] in ("approved", "provisioning", "in_progress") or (
+        bool(chain) and workintake.next_approver(chain, decided) is None
+        and all(d["decision"] == "approved" for d in decided))
+
+    try:
+        if args.approve:
+            d, made = hire.approve(root, args.id, by=args.by,
+                                   approved=order_approved)
+            print(f"{B}편성 완료{Z}  작업 지시 #{args.id}  {D}승인 {d.approved_by}{Z}")
+            for aid in made:
+                print(f"  {G}+{Z} {aid}")
+            lead = d.lead
+            print(f"  {D}팀장: {lead['role_key'] if lead else '없음 — 결정은 전부 본부장에게 올라간다'}{Z}")
+            return 0
+
+        if args.show:
+            d = hire.load(root, args.id)
+        else:
+            print(f"{D}지시문을 읽는 중… (모델 호출){Z}")
+            d = hire.propose(root, dict(r.data), team=args.team)
+            path = hire.save(root, d)
+            print(f"{B}편성 초안{Z}  {path}")
+
+        print(f"  {D}{d.title}  ·  {d.division}/{d.team}  ·  {d.proposed_by}{Z}")
+        if d.notes:
+            print(f"  {D}{d.notes}{Z}")
+        print()
+        for m in d.members:
+            tag = f" {Y}[팀장]{Z}" if m.get("lead") else ""
+            print(f"  {B}{m['role_key']}{Z}{tag}  {m['name']}  {D}{m.get('phase')}{Z}")
+            if m.get("mission"):
+                print(f"      {m['mission']}")
+            print(f"      도구: {', '.join(m['tools'])}")
+            if m.get("dropped_tools"):
+                print(f"      {Y}게이트 밖이라 뺌: {', '.join(m['dropped_tools'])}{Z}")
+        print()
+        print(f"  상태 {d.status} · 지시 결재 {'완료' if order_approved else R + '미완' + Z}")
+        if d.status == "draft":
+            lead = next((c["portal_user"] for c in chain), "본부장")
+            print(f"  {D}고친 뒤:  dawn-biz hire {args.id} --approve --by {lead}{Z}")
+        return 0
+    except hire.HireError as e:
+        # 규칙·형식 문제는 사람이 읽을 메시지로 낸다. 그 밖의 예외는 삼키지
+        # 않는다 — 편성은 권한을 만드는 일이라 조용히 실패하면 안 된다.
+        print(f"{R}✘{Z} {e}")
+        return 1
+
+
 def cmd_crew(args) -> int:
     """작업 지시에 에이전트를 편성한다 (P7 DoD-4).
 
@@ -705,6 +774,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="사람이 집행했다고 선언 (시스템이 검증한 것은 아니다)")
     x.add_argument("--dry-run", action="store_true", help="계획만 보고 잡지 않는다")
     x.set_defaults(func=cmd_infra)
+
+    x = s.add_parser("hire", help="작업 지시를 읽고 편성 초안 생성 (P7)")
+    x.add_argument("id", type=int)
+    x.add_argument("--team", default="", help="팀 지정 (기본: 본부의 L2 있는 팀)")
+    x.add_argument("--show", action="store_true", help="기존 초안 보기 (모델 안 부름)")
+    x.add_argument("--approve", action="store_true", help="본부장 승인 → 실제 편성")
+    x.add_argument("--by", default="", help="승인자 계정")
+    x.set_defaults(func=cmd_hire)
 
     x = s.add_parser("crew", help="작업 지시에 에이전트 편성 (P7)")
     x.add_argument("id", type=int)

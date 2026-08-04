@@ -150,7 +150,7 @@ def test_allocating_twice_does_not_take_two_resources(pool_root):
 
 def test_container_cap_is_respected(pool_root, monkeypatch):
     """el34 랩이 이미 돌고 있다 — 한도를 넘으면 대기시킨다."""
-    monkeypatch.setattr(infrapool, "docker_reachable", lambda: (True, ""))
+    monkeypatch.setattr(infrapool, "docker_reachable", lambda *_: (True, ""))
     for i in (11, 12):
         assert allocate(pool_root, order_id=i, tier="container", zone="dmz",
                         approved=True).state == "ready"
@@ -170,7 +170,7 @@ def test_without_docker_it_hands_over_a_command_instead_of_pretending(pool_root,
                                                                      monkeypatch):
     """에이전트가 도커 소켓을 쥐면 호스트 루트와 다름없다 — 없는 것이 맞다.
     없으면 **못 한다고 말하고 명령서를 낸다.** 한 척하지 않는다."""
-    monkeypatch.setattr(infrapool, "docker_reachable", lambda: (False, "접근 거부"))
+    monkeypatch.setattr(infrapool, "docker_reachable", lambda *_: (False, "접근 거부"))
     a = allocate(pool_root, order_id=15, tier="container", zone="dmz", approved=True)
     assert a.state == "waiting"
     assert "el34-dmz" in a.command, "어느 존 네트워크인지가 명령에 없다"
@@ -180,7 +180,7 @@ def test_without_docker_it_hands_over_a_command_instead_of_pretending(pool_root,
 def test_human_confirmation_is_recorded_as_an_assertion(pool_root, monkeypatch):
     """도커를 못 만지니 컨테이너가 진짜 떴는지 **확인할 수 없다.**
     확인할 수 없는 것을 확인한 척하지 않고, 누가 그렇게 말했는지 남긴다."""
-    monkeypatch.setattr(infrapool, "docker_reachable", lambda: (False, "접근 거부"))
+    monkeypatch.setattr(infrapool, "docker_reachable", lambda *_: (False, "접근 거부"))
     allocate(pool_root, order_id=16, tier="container", zone="dmz", approved=True)
     a = confirm(pool_root, 16, by="ccc")
     assert a.state == "ready"

@@ -45,7 +45,22 @@ def provision(store, root: Path, order_id: int) -> Any:
             f"결재가 끝나지 않았다 (지금 {r['status']}) — 할당은 비가역 행동이다")
 
     # 존은 담당 본부에서 파생한다. 접수 때 비어 있었으면 여기서 채운다.
-    zone = r["zone"] or workintake.zone_for(root, r["division"])
+    #
+    # 단, **줄 수 없는 존은 파생하지 않는다.** 작업 컨테이너가 뜨는 장비에 존
+    # 브리지가 없으면(원격 worker — Q10 미해결) 여기서 채운 존은 그대로 거부로
+    # 돌아온다. 접수자가 존을 적지 않은 것은 "아무 존이나 좋다"가 아니라
+    # "존 격리가 필요 없다"에 가깝고, 그때까지 없던 요구를 파생으로 만들어 낼
+    # 이유가 없다. 접수자가 **명시한** 존은 그대로 두고 거부시킨다 — 그건
+    # 진짜 요구라 조용히 무시하면 안 된다.
+    zone = r["zone"]
+    if not zone:
+        derive = True
+        if r["infra_tier"] == "container":
+            from dawn_core.infrapool import container_target
+
+            derive = container_target(root).zone_networks
+        if derive:
+            zone = workintake.zone_for(root, r["division"])
     a = allocate(root, order_id=order_id, tier=r["infra_tier"], zone=zone,
                  business=r["business"], approved=True)
 

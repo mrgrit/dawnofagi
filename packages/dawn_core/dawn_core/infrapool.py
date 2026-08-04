@@ -78,6 +78,9 @@ class Allocation:
     network: str = ""
     reason: str = ""                # waiting 이면 왜 기다리는지
     command: str = ""               # 사람이 집행해야 하면 그 명령
+    # **어느 장비에 떴나.** 이걸 안 남기면 화면이 "컨테이너 ready" 라고만 말하고
+    # 사람은 이 호스트에 있는 줄 안다 — 찾으러 갔는데 없다.
+    placed_on: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -86,7 +89,8 @@ class Allocation:
         icon = {"ready": "✔", "waiting": "…", "none": "·", "released": "↩"}.get(
             self.state, "?")
         what = self.host_id or self.container or "환경 불필요"
-        return f"  {icon} #{self.order_id} {self.tier:<10} {what:<24} {self.reason}"
+        where = f"@{self.placed_on} " if self.placed_on else ""
+        return f"  {icon} #{self.order_id} {self.tier:<10} {what:<24} {where}{self.reason}"
 
 
 # ── 재고 (사람이 쓴다) ────────────────────────────────────────────────────
@@ -103,6 +107,38 @@ def pool_doc(root: Path) -> dict[str, Any]:
 
     f = Path(root) / "infra" / "pool.yaml"
     return (yaml.safe_load(f.read_text(encoding="utf-8")) if f.is_file() else {}) or {}
+
+
+@dataclass
+class ContainerTarget:
+    """작업 컨테이너를 띄울 곳. 비어 있으면 이 호스트의 로컬 도커."""
+
+    docker_host: str = ""
+    host_name: str = "이 호스트"
+    zone_networks: bool = True
+
+    @property
+    def remote(self) -> bool:
+        return bool(self.docker_host)
+
+    def env(self) -> dict[str, str]:
+        """docker 명령에 씌울 환경. 로컬이면 아무것도 안 바꾼다."""
+        import os
+
+        e = dict(os.environ)
+        if self.docker_host:
+            e["DOCKER_HOST"] = self.docker_host
+        return e
+
+
+def container_target(root: Path) -> ContainerTarget:
+    """`infra/pool.yaml` 의 `container:` — 어디에 띄우나."""
+    d = (pool_doc(root).get("container") or {})
+    return ContainerTarget(
+        docker_host=str(d.get("docker_host", "") or ""),
+        host_name=str(d.get("host_name", "") or "이 호스트"),
+        zone_networks=bool(d.get("zone_networks", True)),
+    )
 
 
 def load_pool(root: Path) -> tuple[dict[str, Any], list[Host]]:
@@ -181,17 +217,26 @@ def transit_open(root: Path, zone: str) -> bool:
 # ── 능력 탐지 ────────────────────────────────────────────────────────────
 
 
-def docker_reachable() -> tuple[bool, str]:
-    """이 프로세스가 도커를 만질 수 있나.
+def docker_reachable(target: "ContainerTarget | None" = None) -> tuple[bool, str]:
+    """도커를 만질 수 있나. `target` 을 주면 **그쪽** 도커를 본다.
 
     만질 수 **없는 것이 기본이고 그게 맞다** — 에이전트가 도커 소켓을 쥐면
     호스트 루트와 다름없다(최소권한 위반). 못 만지면 명령서를 내고 사람이 집행한다.
+
+    원격은 SSH 라 로컬보다 느리고 더 많이 깨진다(호스트 키·네트워크·키 권한).
+    타임아웃을 넉넉히 주되 무한정 기다리지는 않는다 — 여기서 멈추면 할당
+    전체가 멈춘다.
     """
     if not shutil.which("docker"):
         return False, "docker 명령이 없다"
+    env = target.env() if target else None
+    timeout = 30 if (target and target.remote) else 10
     try:
         p = subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
-                           capture_output=True, text=True, timeout=10)
+                           capture_output=True, text=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        where = target.host_name if target else "이 호스트"
+        return False, f"{where} 도커가 {timeout}초 안에 응답하지 않았다"
     except (OSError, subprocess.SubprocessError) as e:
         return False, f"docker 실행 실패: {e}"
     if p.returncode != 0:
@@ -210,12 +255,21 @@ def _check_rules(root: Path, *, tier: str, zone: str, business: str,
         raise PoolError("결재가 끝나지 않았다 — 할당은 비가역 행동이다")
     if tier not in INFRA_TIERS:
         raise PoolError(f"알 수 없는 인프라 등급: {tier}")
-    if tier != "none" and not zone:
+    if tier == "container":
+        ct = container_target(root)
+        if not ct.zone_networks:
+            # 존 브리지가 없는 장비다. 존을 선언했으면 못 지킨다 — 붙여 놓고
+            # "존에 있다"고 기록하면 게이트도 심각도도 거짓이 된다.
+            if zone:
+                raise PoolError(
+                    f"{ct.host_name} 에는 존 브리지가 없다 — {zone} 를 줄 수 없다. "
+                    "존 없이 돌리거나(작업 지시의 zone 을 비운다), "
+                    "pipe 경유 경로를 먼저 연다 (infra/el34/route-external.sh · Q10)")
+        elif zone not in CONTAINER_ZONES:
+            raise PoolError(
+                f"컨테이너 존이 아니다: {zone} (가능: {', '.join(CONTAINER_ZONES)})")
+    elif tier != "none" and not zone:
         raise PoolError("존을 정하지 않았다 — 존 없이는 게이트도 심각도도 계산이 안 된다")
-
-    if tier == "container" and zone not in CONTAINER_ZONES:
-        raise PoolError(
-            f"컨테이너 존이 아니다: {zone} (가능: {', '.join(CONTAINER_ZONES)})")
 
     if tier in ("vm", "server"):
         _limits, hosts = load_pool(root)
@@ -244,22 +298,28 @@ def plan(root: Path, *, order_id: int, tier: str, zone: str = "",
         return a
 
     if tier == "container":
+        ct = container_target(root)
         a.container = f"wo{order_id}"
-        a.network = f"{NET_PREFIX}{zone}"
+        a.placed_on = ct.host_name
+        a.network = f"{NET_PREFIX}{zone}" if (ct.zone_networks and zone) else ""
         limits, _hosts = load_pool(root)
         cap = int(limits.get("container_max", 0) or 0)
         used = sum(1 for x in ledger(root) if x.state == "ready" and x.container)
         if cap and used >= cap:
             a.state, a.reason = "waiting", f"컨테이너 한도 초과 ({used}/{cap})"
             return a
-        ok, why = docker_reachable()
-        a.command = (f"docker run -d --name {a.container} --network {a.network} "
+        ok, why = docker_reachable(ct)
+        net = f"--network {a.network} " if a.network else ""
+        host = f"DOCKER_HOST={ct.docker_host} " if ct.remote else ""
+        a.command = (f"{host}docker run -d --name {a.container} {net}"
                      f"--restart unless-stopped <image>")
         if not ok:
             a.state = "waiting"
-            a.reason = f"도커 접근 권한 없음 ({why}) — 사람이 집행한다"
+            a.reason = f"{ct.host_name} 도커에 닿지 않는다 ({why}) — 사람이 집행한다"
             return a
         a.state = "ready"
+        # 배치는 line() 이 앞에 붙인다 — 여기서 또 적으면 두 번 나온다.
+        a.reason = "" if a.network else "존 브리지 없음 (논리 존 미부여)"
         return a
 
     free = available(root, tier)
