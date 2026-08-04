@@ -107,6 +107,28 @@ def pick_team(root: Path, division: str, *, hint: str = "") -> str:
     return usable[0]
 
 
+def team_works(root: Path, team: str) -> list[str]:
+    """이 팀이 맡을 수 있는 업무(SOP).
+
+    팀의 `work_domains` 가 상위 분류고, 실제 업무는 `<도메인>/<이름>` 이다.
+    여기 없는 업무를 에이전트에 달면 레지스트리 무결성이 깨진다 — 실재하지
+    않는 SOP 를 참조하는 에이전트가 생긴다.
+    """
+    from . import Registry
+
+    reg = Registry.load(root)
+    t = reg.teams.get(team)
+    if t is None:
+        raise HireError(f"없는 팀: {team}")
+    domains = set(t.data.get("work_domains") or [])
+    out = sorted(w for w in reg.works if w.split("/", 1)[0] in domains)
+    if not out:
+        raise HireError(
+            f"{team} 팀이 맡을 업무가 없다 — work_domains={sorted(domains) or '없음'} "
+            "에 해당하는 업무가 org/works 에 없다")
+    return out
+
+
 def allowed_tools(root: Path, team: str) -> set[str]:
     """이 팀이 실제로 쓸 수 있는 도구 — 게이트가 정한다."""
     from .crew import _team_tools
@@ -124,6 +146,7 @@ _SCHEMA = """{
       "mission": "이 에이전트가 책임지는 것 한 문장",
       "lead": true 또는 false,
       "tools": ["도구 id", ...],
+      "works": ["업무 id", ...],
       "phase": "P1" | "P2" | "P3",
       "depends_on": ["먼저 끝나야 하는 role_key", ...]
     }
@@ -131,13 +154,15 @@ _SCHEMA = """{
 }"""
 
 
-def _prompt(order: dict[str, Any], tools: list[str], team: str) -> tuple[str, str]:
+def _prompt(order: dict[str, Any], tools: list[str], works: list[str],
+            team: str) -> tuple[str, str]:
     system = (
         "너는 이 회사의 편성 담당이다. 작업 지시를 읽고 **누가 필요한지**를 정한다.\n"
         "\n"
         "규칙:\n"
         f"- 최대 {MAX_MEMBERS}명. 적을수록 좋다 — 사람이 늘면 조율 비용이 산출물보다 커진다.\n"
-        "- 도구는 **주어진 목록에서만** 고른다. 목록에 없는 것을 적으면 무시된다.\n"
+        "- 도구와 업무는 **주어진 목록에서만** 고른다. 목록에 없는 것을 적으면 무시된다.\n"
+        "- 업무(works)는 최소 1개. 이 에이전트가 어느 SOP 아래서 일하는가다.\n"
         "- 각자에게 **자기 일에 필요한 것만** 준다. 넉넉히 주지 않는다.\n"
         "- 팀장(lead)은 **0명 또는 1명.** 결정이 자주 필요한 작업에만 둔다.\n"
         "  팀장은 자기 게이트 안의 결정만 스스로 내린다 — 비가역·L3 는 사람에게 간다.\n"
@@ -153,7 +178,8 @@ def _prompt(order: dict[str, Any], tools: list[str], team: str) -> tuple[str, st
         f"사업: {order.get('business')} · 본부: {order.get('division')} · 팀: {team}\n"
         f"환경: {order.get('infra_tier')} · 보안등급: {order.get('security_level')}\n\n"
         f"## 지시문\n{body}\n\n"
-        f"## 이 팀이 쓸 수 있는 도구 ({len(tools)}개)\n{', '.join(tools)}\n"
+        f"## 이 팀이 쓸 수 있는 도구 ({len(tools)}개)\n{', '.join(tools)}\n\n"
+        f"## 이 팀이 맡을 수 있는 업무 ({len(works)}개)\n{', '.join(works)}\n"
     )
     return system, prompt
 
@@ -220,8 +246,9 @@ def propose(root: Path, order: dict[str, Any], *, team: str = "",
     if not allowed:
         raise HireError(f"{team} 팀이 쓸 수 있는 도구가 없다 — 게이트를 확인하라")
 
+    works = team_works(root, team)
     model_id, _eg_org = _model_for(root, team)
-    system, prompt = _prompt(order, sorted(allowed), team)
+    system, prompt = _prompt(order, sorted(allowed), works, team)
     comp = llm.LLMClient(timeout=timeout).complete(
         llm.resolve(model_id, touches_l3=False),
         system=system, prompt=prompt, max_tokens=2500)
@@ -251,7 +278,11 @@ def propose(root: Path, order: dict[str, Any], *, team: str = "",
             "dropped_tools": dropped,
             "phase": str(m.get("phase") or "P1"),
             "depends_on": [str(x) for x in (m.get("depends_on") or [])],
-            "works": [],
+            # 업무는 **비울 수 없다** — 스키마가 막고, 막는 게 맞다. 업무 없이
+            # 존재하는 에이전트는 "무엇을 하는 사람인가"에 답이 없다.
+            # 모델이 못 고르면 팀의 첫 업무로 떨어뜨린다.
+            "works": sorted(
+                {str(w) for w in (m.get("works") or [])} & set(works)) or [works[0]],
         })
 
     if not members:
@@ -319,6 +350,7 @@ def to_members(root: Path, d: Draft) -> list:
 
     reg = Registry.load(root)
     allowed = allowed_tools(root, d.team)
+    works_ok = team_works(root, d.team)
     persona = reg.teams[d.team].data.get("persona_default", "corporate")
     out = []
     for m in d.members:
@@ -328,7 +360,8 @@ def to_members(root: Path, d: Draft) -> list:
             name=str(m.get("name") or m["role_key"]),
             team=d.team,
             persona=persona,
-            works=[str(w) for w in (m.get("works") or [])],
+            works=sorted({str(w) for w in (m.get("works") or [])} & set(works_ok))
+                  or [works_ok[0]],
             tools=sorted(asked & allowed) or ["eg.search", "eg.record"],
             zone="",
             phase=str(m.get("phase") or "P1"),
@@ -362,5 +395,5 @@ def approve(root: Path, order_id: int, *, by: str, approved: bool) -> tuple[Draf
 __all__ = [
     "DRAFT_DIR", "Draft", "HireError", "NEVER",
     "allowed_tools", "approve", "draft_path", "load", "pick_team",
-    "propose", "save", "to_members",
+    "propose", "save", "team_works", "to_members",
 ]

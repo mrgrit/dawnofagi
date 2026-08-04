@@ -1,0 +1,12 @@
+# 작업 게이트 — **좁히기만** 한다. 팀 게이트를 넓힐 수 없다 (단조 축소).
+# 여기 allow 에 팀 경계 밖 도구를 적으면 컴파일이 실패한다.
+tools:
+  allow:
+  - doc.read
+  - doc.search
+  - doc.write
+  - eg.search
+  - fs.read
+  - proj.read
+  - proj.task_write
+autonomy: A1

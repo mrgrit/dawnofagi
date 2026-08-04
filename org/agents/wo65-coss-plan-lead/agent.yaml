@@ -1,0 +1,23 @@
+# 작업 지시 #65 편성 — **자동 생성**. 손으로 고치지 마라.
+# 작업이 끝나면 회수된다. 상시 에이전트는 접두어 없이 만든다.
+id: wo65-coss-plan-lead
+team: aoc-dev
+name: 사업 기획·조율 팀장
+role: worker
+persona: aoc-dev
+works:
+- engineering/project-coordination
+autonomy: A1
+tools:
+- doc.read
+- doc.search
+- doc.write
+- eg.search
+- fs.read
+- proj.read
+- proj.task_write
+status: active
+notes: '작업 지시 #65 편성. 작업 종료 시 회수된다 (P7 DoD-4).'
+telemetry:
+  emit: true
+  service_name: dawn.agent.wo65-coss-plan-lead

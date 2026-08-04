@@ -1,0 +1,21 @@
+# 작업 지시 #65 편성 — **자동 생성**. 손으로 고치지 마라.
+# 작업이 끝나면 회수된다. 상시 에이전트는 접두어 없이 만든다.
+id: wo65-guardrail-verifier
+team: aoc-dev
+name: 원칙 검증자
+role: worker
+persona: aoc-dev
+works:
+- engineering/feature-build
+autonomy: A1
+tools:
+- dev.git
+- dev.tests
+- doc.read
+- fs.read
+- sec.trace_query
+status: active
+notes: '작업 지시 #65 편성. 작업 종료 시 회수된다 (P7 DoD-4).'
+telemetry:
+  emit: true
+  service_name: dawn.agent.wo65-guardrail-verifier
