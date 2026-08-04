@@ -518,6 +518,20 @@ function shade(hex, f){
   return "rgb(" + r + "," + g + "," + b + ")";
 }
 
+/* 접근 표시는 **글씨만** 밝힌다.
+   집기 색과 램프를 걷어낸 뒤로는 이 글자가 유일한 신호라, 그냥 색만 바꾸면
+   배경에 묻힌다. 같은 색으로 번지게 깔아 글자 자체가 빛나 보이게 한다.
+   그림자는 캔버스 전역 상태라 반드시 되돌린다 — 안 그러면 뒤에 그리는
+   모든 글자에 번짐이 남는다. */
+function glowLabel(t, p, c, size, weight){
+  ctx.save();
+  ctx.shadowColor = c;
+  ctx.shadowBlur = 10 * Math.max(.8, S.cam.z);
+  label(t, p, c, size, undefined, weight);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
 function label(t, p, c, size, align, weight){
   ctx.fillStyle = c || "#d6e2f0"; ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
   ctx.font = (weight||"") + " " + Math.max(8, size||11) + "px ui-monospace,Menlo,Consolas,monospace";
@@ -728,20 +742,18 @@ function drawSectors(lv, alpha){
       // 둘을 같은 색으로 켜면 아무도 없는 방에 불만 들어와 어긋나 보인다.
       const mode = S.lit && S.lit.assets.get(as.id);   // "here" | "remote" | undefined
       const lit = !!mode;
-      const warm = mode === "here" ? "255,214,140" : "126,200,227";   // 방문 / 원격
-      furniture(as.kind, gx, gy, lv.level, lit ? shade(c, mode === "here" ? 2.0 : 1.6) : c);
-      if(lit){
-        const lp = P(gx + 0.4, gy + 0.4, lv.level, 7);
-        S.assetPos[as.id] = lp;                  // 원격선이 여기를 겨눈다
-        ctx.fillStyle = "rgba(" + warm + ",.95)";
-        ctx.beginPath(); ctx.arc(lp.x, lp.y, 3.0 * Math.max(.8, S.cam.z), 0, 6.2832); ctx.fill();
-        ctx.fillStyle = "rgba(" + warm + ",.16)";
-        ctx.beginPath(); ctx.arc(lp.x, lp.y, 9.0 * Math.max(.8, S.cam.z), 0, 6.2832); ctx.fill();
+      // 집기 자체는 건드리지 않는다. 색이 바뀌면 "이 자산이 달라졌나" 로 읽히는데
+      // 실제로 달라진 건 **지금 누가 보고 있다**는 사실뿐이다. 그건 이름표의 일이다.
+      furniture(as.kind, gx, gy, lv.level, c);
+      // 램프는 없앴지만 위치는 계속 기록한다 — 원격선이 이 점을 겨눈다.
+      if(lit) S.assetPos[as.id] = P(gx + 0.4, gy + 0.4, lv.level, 7);
+      if(named || lit){
+        const lp = P(gx+0.4, gy+0.75, lv.level, 2 + (j%3)*9);
+        const sz = 9.5*Math.max(.9, S.cam.z);
+        if(lit) glowLabel(as.name, lp, mode === "here" ? "#ffd68c" : "#7ec8e3",
+                          sz, "bold");
+        else    label(as.name, lp, shade(c, 1.55), sz);
       }
-      if(named || lit)
-        label(as.name, P(gx+0.4, gy+0.75, lv.level, 2 + (j%3)*9),
-              lit ? (mode === "here" ? "#ffd68c" : "#7ec8e3") : shade(c, 1.55),
-              9.5*Math.max(.9, S.cam.z), undefined, lit ? "bold" : undefined);
     });
     if(detail() && z.assets.length)
       label("자산 " + z.assets.length + (z.entries ? " · 진입 " + z.entries + "회" : "") +
@@ -771,16 +783,17 @@ function drawTeams(lv){
   lv.teams.forEach(is => {
     const t = is.t, live = t.runs > 0;
     const on = !!(S.lit && S.lit.teams.has(t.team_id));   // 지금 자리에 앉아 있나
+    // 바닥은 그대로 둔다 (② 와 같은 이유) — 밝아지는 것은 팀 이름뿐이다.
     slab(is.x-0.2, is.y, is.w+0.4, is.d-0.4, lv.level, 0.45,
-         on ? "#3c4f60" : (live ? "#28343f" : "#212a34"),
-         on ? "#8aa0b4" : "#384654");
+         live ? "#28343f" : "#212a34", "#384654");
     box(is.x-0.2, is.y, 0.16, is.d-0.4, 13, lv.level, "#3a4757", "#28323d", "#1f2831"); // 칸막이
     desk(is.x, is.y+1.4, lv.level, lv.f.color);                 // 두 자리
     desk(is.x+1.5, is.y+1.4, lv.level, lv.f.color);
     if(t.agents.length > 2) plant(is.x+2.5, is.y+0.4, lv.level);
     if(detail()){
-      label(t.name, P(is.x+is.w/2, is.y+is.d-0.4, lv.level, 6),
-            t.agents.length ? "#9fb0c2" : "#4d5b6a", 10*S.cam.z);
+      const tp = P(is.x+is.w/2, is.y+is.d-0.4, lv.level, 6);
+      if(on) glowLabel(t.name, tp, "#ffd68c", 10*S.cam.z, "bold");
+      else   label(t.name, tp, t.agents.length ? "#9fb0c2" : "#4d5b6a", 10*S.cam.z);
       if(live) label("run " + t.runs, P(is.x+is.w/2, is.y+is.d-0.4, lv.level, -6),
                      "#2ab7a9", 9*S.cam.z);
     }
