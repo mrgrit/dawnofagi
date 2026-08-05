@@ -671,7 +671,9 @@ def cmd_start(args) -> int:
     for st in stages:
         print(f"  {B}{st['agent_id']}{Z} 착수…")
         w = Worker(st["agent_id"])
-        run = w.run(f"{r['title']}\n\n{r['body']}", purpose="work")
+        # act=True — **도구를 쓰며 일한다.** 이게 없으면 조회·생각·기록만 돌고
+        # 편성이 준 fs.write·dev.git 은 아무도 집행하지 않는다(실측 #65).
+        run = w.run(f"{r['title']}\n\n{r['body']}", purpose="work", act=True)
         v = review(run, eg_store=w.eg, with_judge=not args.no_judge,
                    high_risk=r["infra_tier"] in ("vm", "server"))
         verdicts.append(v)

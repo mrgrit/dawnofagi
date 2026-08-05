@@ -309,6 +309,125 @@ class Worker:
             )
             return decision, result
 
+
+    # ── 도구 루프 (T18-b) ───────────────────────────────────────────────
+    #
+    # 프로토콜을 태그로 쓰는 이유: JSON 한 덩어리를 요구하면 모델이 코드·본문을
+    # 통째로 문자열에 넣어야 하고, 거기서 이스케이프가 깨진다. 실제로 넣을 것이
+    # 파일 내용이라 그 위험이 크다.
+    ACT_SYSTEM = """
+너는 지금 **실제로 일한다.** 계획만 내지 말고 도구를 써서 산출물을 만들어라.
+
+도구를 쓰려면 이 형식으로만 답한다. 한 번에 **하나**다:
+
+<도구 이름="fs.write">
+<인자 이름="path">apps/coss/README.md</인자>
+<인자 이름="content">여러 줄
+그대로 들어간다</인자>
+</도구>
+
+다 끝났으면:
+
+<완료>
+최종 산출물 요약. 무엇을 만들었고 어디에 있는지.
+</완료>
+
+규칙:
+- 아래 목록에 있는 도구만 부른다. 없는 것을 부르면 거부된다.
+- 도구 결과가 실패로 오면 **원인을 읽고 고쳐서** 다시 시도한다. 같은 호출을
+  반복하지 않는다.
+- 게이트가 막으면 거기서 끝이다. 우회로를 찾지 말고 <완료> 로 상황을 보고한다.
+- 파일 경로는 저장소 루트 기준 상대경로다.
+"""
+
+    def _act_tools(self) -> str:
+        """이 에이전트가 부를 수 있는 도구와 인자. **선언된 것만** 보여준다."""
+        lines = []
+        for name in sorted(self.compiled.declared_tools):
+            try:
+                sk = self.skills.get(name)
+            except Exception:
+                # 선언은 됐는데 등록이 없다 — 부르면 어차피 실패한다. 목록에
+                # 올려 두면 모델이 그걸 시도하느라 라운드를 태운다.
+                continue
+            if sk.run is None:
+                continue                      # 실행부 미구현 (preview 전용)
+            lines.append(f"- {name}({', '.join(sk.arg_names)})")
+        return "\n".join(lines) or "- (없음)"
+
+    @staticmethod
+    def _parse_act(text: str) -> tuple[str, str, dict[str, str]]:
+        """모델 답 → ("tool", 이름, 인자) 또는 ("done", 본문, {}).
+
+        형식이 아니면 ("done", 원문, {}) 으로 본다 — 모델이 그냥 답을 쓴 것이고,
+        그걸 오류로 만들면 멀쩡한 산출물이 버려진다.
+        """
+        import re
+
+        m = re.search(r"<완료>(.*?)</완료>", text, re.S)
+        if m:
+            return "done", m.group(1).strip(), {}
+        m = re.search(r'<도구\s+이름="([^"]+)"\s*>(.*?)</도구>', text, re.S)
+        if not m:
+            return "done", text.strip(), {}
+        name, body = m.group(1).strip(), m.group(2)
+        args = {a.group(1): a.group(2)
+                for a in re.finditer(r'<인자\s+이름="([^"]+)"\s*>(.*?)</인자>', body, re.S)}
+        return "tool", name, args
+
+    def act(self, run: WorkerRun, task: str, ctx: str, *,
+            touches_l3: bool = False, max_rounds: int = 8) -> str:
+        """모델이 도구를 골라 가며 일한다. 게이트는 매 호출마다 걸린다.
+
+        `max_rounds` 는 도구 예산(`max_tool_calls`)과 **다른 축**이다. 예산은
+        "몇 번 만질 수 있나"고 이건 "몇 번 생각할 수 있나"다. 도구를 안 부르고
+        말만 반복하는 경우가 있어서 둘 다 필요하다.
+        """
+        tools_txt = self._act_tools()
+        transcript: list[str] = []
+        for _ in range(max_rounds):
+            prompt = (
+                f"## 업무\n{task}\n\n"
+                f"## EG 참조\n{ctx or '(없음)'}\n\n"
+                f"## 쓸 수 있는 도구\n{tools_txt}\n\n"
+                + ("## 지금까지\n" + "\n\n".join(transcript[-6:]) + "\n\n"
+                   if transcript else "")
+                + "다음 한 수를 내라."
+            )
+            reply = self.chat(run, prompt, touches_l3=touches_l3,
+                              system_extra=self.ACT_SYSTEM)
+            kind, name, args = self._parse_act(reply)
+            if kind == "done":
+                return name
+
+            if name not in self.compiled.declared_tools:
+                # 게이트도 막지만 여기서 먼저 끊는다 — 선언 밖 도구는 preview
+                # 조차 만들 이유가 없고, 이유를 알려 줘야 다음 수가 나아진다.
+                transcript.append(f"[{name}] 거부 — 이 에이전트에 선언되지 않은 도구다")
+                continue
+
+            try:
+                decision, result = self.use_skill(run, name, **args)
+            except CircuitBreaker as exc:
+                return (f"도구 예산 소진 — {exc}\n\n"
+                        + "\n\n".join(transcript[-4:]))
+
+            if result is None:
+                # block · require_hitl — **여기서 끝난다.** 우회를 허용하면
+                # 게이트가 장식이 된다. 사람이 판단할 것을 남기고 보고한다.
+                why = "; ".join(decision.reasons) or decision.decision
+                return (f"게이트에서 멈췄다 — `{name}` {decision.decision}\n"
+                        f"사유: {why}\n"
+                        f"승인 큐: {run.hitl_requests[-1] if run.hitl_requests else '-'}\n\n"
+                        + "\n\n".join(transcript[-4:]))
+
+            head = f"[{name}] {'성공' if result.ok else '실패'}"
+            body = (result.output if result.ok else result.error)[:1200]
+            transcript.append(f"{head}\n{body}")
+
+        return ("생각 한도(%d회)에 걸렸다. 지금까지:\n\n" % max_rounds
+                + "\n\n".join(transcript[-4:]))
+
     # ── 모델 호출 ───────────────────────────────────────────────────────
     def resolve_model(self, *, touches_l3: bool) -> llm_mod.Resolved:
         """EG 가 고른 모델. **여기서 정책을 만들지 않는다 — 조회할 뿐.**"""
@@ -334,7 +453,8 @@ class Worker:
         return llm_mod.resolve(policy_id, touches_l3=touches_l3)
 
     def chat(
-        self, run: WorkerRun, prompt: str, *, touches_l3: bool = False, max_tokens: int = 1500
+        self, run: WorkerRun, prompt: str, *, touches_l3: bool = False,
+        max_tokens: int = 1500, system_extra: str = "",
     ) -> str:
         resolved = self.resolve_model(touches_l3=touches_l3)
         run.model, run.provider, run.model_policy = (
@@ -343,6 +463,9 @@ class Worker:
             resolved.model_policy_id,
         )
         system = self.system_prompt()
+        if system_extra:
+            # SOUL 뒤에 붙인다 — 앞에 두면 도구 형식이 정체성보다 먼저 읽힌다.
+            system = system + "\n\n---\n" + system_extra
 
         with self.tracer.span(
             OP_CHAT,
@@ -412,6 +535,7 @@ class Worker:
         touches_l3: bool | None = None,
         extra_skills: list[tuple[str, dict]] | None = None,
         purpose: str = "work",
+        act: bool = False,
     ) -> WorkerRun:
         """4단계 루프를 한 번 돈다.
 
@@ -456,8 +580,14 @@ class Worker:
                         gathered.append(f"### {name}\n{result.output[:3000]}")
 
                 # 모델 호출 — L3 관여 여부가 라우팅을 바꾼다
-                prompt = _build_prompt(task, ctx, gathered)
-                wr.output = self.chat(wr, prompt, touches_l3=l3)
+                if act:
+                    # 도구를 쓰며 일한다. 기본이 아닌 이유: 이 스위치를 켜면
+                    # 모델이 파일을 쓰고 명령을 돌린다. 상시 작업·드릴·레드팀은
+                    # 그럴 필요가 없고, 한꺼번에 바꾸면 영향 범위가 너무 넓다.
+                    wr.output = self.act(wr, task, ctx, touches_l3=l3)
+                else:
+                    prompt = _build_prompt(task, ctx, gathered)
+                    wr.output = self.chat(wr, prompt, touches_l3=l3)
 
                 # ④ eg_record — 없으면 미완료
                 # 이름은 **첫 줄만** 쓴다. 앞 80자를 그대로 쓰면 긴 지시문에서는
