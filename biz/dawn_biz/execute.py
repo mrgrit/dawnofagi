@@ -115,8 +115,11 @@ def review(run, *, eg_store=None, with_judge: bool = True,
     if with_judge:
         from dawn_aoc.detect import judge
 
+        # run 이 L3 를 건드렸는지 그대로 넘긴다. 없으면 True(보수적) —
+        # 모르는데 클라우드로 보내는 것보다 느린 편이 낫다.
         jr = judge(getattr(run, "task", ""), str(getattr(run, "output", "")),
-                   watched_policy_id=getattr(run, "model_policy", ""), eg_store=eg_store)
+                   watched_policy_id=getattr(run, "model_policy", ""), eg_store=eg_store,
+                   touches_l3=bool(getattr(run, "touches_l3", True)))
         if jr.error or jr.verdict == "unknown":
             v.reasons.append(f"품질 판정 불가 — {jr.error or 'JSON 파싱 실패'}")
         else:

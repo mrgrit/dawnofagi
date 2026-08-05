@@ -345,7 +345,8 @@ def _resolved_model(policy_id: str) -> str:
         return ""
 
 
-def pick_judge_model(watched_policy_id: str, eg_store) -> str:
+def pick_judge_model(watched_policy_id: str, eg_store, *,
+                     prefer_local: bool = False) -> str:
     """피감시 모델과 다른 ModelPolicy 를 고른다 (담합 방지).
 
     **정책 id 가 다른 것으로는 부족하다.** `model:openlocal` 과 `model:gptoss` 는
@@ -359,10 +360,13 @@ def pick_judge_model(watched_policy_id: str, eg_store) -> str:
     candidates = [
         n.id for n in eg_store.nodes(type="ModelPolicy") if n.id != watched_policy_id
     ]
-    # 로컬을 선호한다 — 판정 대상에 L3 가 섞여 있을 수 있다
+    # 로컬 선호는 **L3 를 건드린 산출물일 때만.** 규칙 5 는 L3 를 클라우드에
+    # 보내지 말라는 것이지 모든 판정을 사내 GPU 로 돌리라는 것이 아니다.
+    # 항상 로컬로 두면 착수 한 번에 판정이 인원수만큼 그 장비로 몰린다.
     local = [c for c in candidates
              if (eg_store.node(c) or None) and eg_store.node(c).prop("cost_tier") == "local"]
-    ordered = local + [c for c in candidates if c not in local]
+    cloud = [c for c in candidates if c not in local]
+    ordered = (local + cloud) if prefer_local else (cloud + local)
     # 실제로 다른 모델로 풀리는 것을 먼저 쓴다. 하나도 없으면 첫 후보를 돌려주고
     # judge() 가 담합으로 거절한다 — 조용히 자기 채점하게 두지 않는다.
     for c in ordered:
@@ -424,9 +428,17 @@ def judge(
     eg_store=None,
     client: llm_mod.LLMClient | None = None,
     max_tokens: int = 1200,
+    touches_l3: bool = True,
 ) -> JudgeResult:
-    """LLM-as-judge — 할루시네이션·완료성·궤적."""
-    policy = pick_judge_model(watched_policy_id, eg_store)
+    """LLM-as-judge — 할루시네이션·완료성·궤적.
+
+    Args:
+        touches_l3: 판정 **대상**이 L3 를 건드렸나. 참이면 로컬 모델만 쓴다
+            (규칙 5). 기본이 True 인 것은 모르면 보수적으로 가기 위함이고,
+            아는 호출자는 반드시 실제 값을 넘겨야 한다 — 안 넘기면 판정이
+            전부 사내 GPU 로 몰린다.
+    """
+    policy = pick_judge_model(watched_policy_id, eg_store, prefer_local=touches_l3)
     res = JudgeResult(judge_model=policy)
     if policy == watched_policy_id:
         res.error = "판정 모델이 피감시 모델과 같다 — 담합 위험"
@@ -439,7 +451,7 @@ def judge(
                      "EG 에 다른 모델을 쓰는 ModelPolicy 를 추가하라")
         return res
     try:
-        resolved = llm_mod.resolve(policy, touches_l3=True)   # 산출물에 L3 가 섞일 수 있다
+        resolved = llm_mod.resolve(policy, touches_l3=touches_l3)
         comp = (client or llm_mod.LLMClient()).complete(
             resolved,
             system="당신은 독립 감사자다. JSON 만 출력한다.",

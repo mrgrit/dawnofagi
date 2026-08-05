@@ -72,6 +72,9 @@ class WorkerRun:
     purpose: str = "work"
     model: str = ""
     model_policy: str = ""
+    # 이 실행이 L3(인사·재무·개인정보)를 건드렸나. **판정자 라우팅이 이걸 본다** —
+    # 늘 참이라고 가정하면 판정이 전부 사내 GPU 로 몰린다(착수 1회에 인원수만큼).
+    touches_l3: bool = False
     provider: str = ""
     tokens_in: int = 0
     tokens_out: int = 0
@@ -594,6 +597,7 @@ class Worker:
                         gathered.append(f"### {name}\n{result.output[:3000]}")
 
                 # 모델 호출 — L3 관여 여부가 라우팅을 바꾼다
+                wr.touches_l3 = l3
                 if act:
                     # 도구를 쓰며 일한다. 기본이 아닌 이유: 이 스위치를 켜면
                     # 모델이 파일을 쓰고 명령을 돌린다. 상시 작업·드릴·레드팀은
