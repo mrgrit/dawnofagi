@@ -460,10 +460,15 @@ class Worker:
                 wr.output = self.chat(wr, prompt, touches_l3=l3)
 
                 # ④ eg_record — 없으면 미완료
+                # 이름은 **첫 줄만** 쓴다. 앞 80자를 그대로 쓰면 긴 지시문에서는
+                # 머리말이 잘려 들어가 여러 에이전트의 기록이 전부 같은 이름이
+                # 된다(실측 #65: 5건이 동일). EG 는 다음 작업의 참조 근거라,
+                # 검색 결과가 구별되지 않으면 근거로 못 쓴다.
+                headline = (task.strip().splitlines() or [""])[0][:80]
                 self.eg_record(
                     wr,
                     "task",
-                    f"[{self.agent_id}] {task[:80]}",
+                    f"[{self.agent_id}] {headline}",
                     (wr.output or "")[:2000],
                 )
                 root.set(
