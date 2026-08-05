@@ -17,6 +17,8 @@ tools:
 - proj.read
 - proj.task_write
 status: active
+phase: P1
+depends_on: []
 notes: '작업 지시 #65 편성. 작업 종료 시 회수된다 (P7 DoD-4).'
 telemetry:
   emit: true

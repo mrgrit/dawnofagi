@@ -152,8 +152,28 @@ def stage_plan(root: Path, *, order_id: int) -> list[dict[str, Any]]:
             "team": doc.get("team", ""),
             "works": list(doc.get("works") or []),
             "tools": list(doc.get("tools") or []),
+            "phase": str(doc.get("phase") or "P1"),
+            "depends_on": list(doc.get("depends_on") or []),
         })
+    # **위상 순으로 편다.** formed() 는 파일 이름 순이라 그대로 두면 P3 검증자가
+    # P2 구현자보다 먼저 돈다 — 아직 없는 산출물을 검증하는 셈이다.
+    out.sort(key=_phase_key)
     return out
+
+
+def _phase_key(stage: dict[str, Any]) -> tuple[int, str]:
+    """정렬 키 — 위상 숫자, 그 안에서는 이름.
+
+    같은 위상은 서로 기다리지 않는다(설계상 병렬). 지금 집행부는 순차로 돌지만
+    순서가 결과를 바꾸지 않아야 하므로 이름으로 고정한다 — 실행마다 순서가
+    달라지면 재현이 안 된다.
+    """
+    raw = str(stage.get("phase") or "P1")
+    try:
+        n = int(raw.lstrip("Pp") or 1)
+    except ValueError:
+        n = 1
+    return (n, stage.get("agent_id", ""))
 
 
 def can_start(store, order_id: int) -> tuple[bool, str]:

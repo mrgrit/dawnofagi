@@ -15,6 +15,11 @@ tools:
 - fs.read
 - sec.trace_query
 status: active
+phase: P3
+depends_on:
+- eg-schema-dev
+- reminder-batch-dev
+- ingest-router-dev
 notes: '작업 지시 #65 편성. 작업 종료 시 회수된다 (P7 DoD-4).'
 telemetry:
   emit: true

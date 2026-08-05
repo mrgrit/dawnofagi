@@ -244,6 +244,11 @@ def _agent_yaml(m: Member, aid: str, order_id: int) -> str:
         "id": aid, "team": m.team, "name": m.name, "role": "worker",
         "persona": m.persona, "works": m.works or [], "autonomy": m.autonomy,
         "tools": sorted(set(m.tools)), "status": "active",
+        # 위상은 **매니페스트에 남긴다.** SOUL.md 산문에만 두면 착수 순서를
+        # 정하는 쪽(stage_plan)이 읽을 방법이 없다 — 실제로 그래서 알파벳순으로
+        # 돌았고, 검증자가 아직 없는 산출물을 검증하게 돼 있었다.
+        "phase": m.phase,
+        "depends_on": list(m.depends_on),
         "notes": f"작업 지시 #{order_id} 편성. 작업 종료 시 회수된다 (P7 DoD-4).",
     }
     if m.zone:

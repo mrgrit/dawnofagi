@@ -380,9 +380,16 @@ def approve(root: Path, order_id: int, *, by: str, approved: bool) -> tuple[Draf
     """
     from .crew import form
 
+    from .crew import formed
+
     d = load(root, order_id)
-    if d.status == "approved":
-        raise HireError(f"이미 승인된 편성안이다 ({d.approved_by} · {d.approved_at})")
+    # 가드는 **지금 편성이 존재하는가**로 본다. 초안의 status 는 기록일 뿐이다 —
+    # 회수(`crew --disband`) 한 뒤 다시 세우는 것은 정당한데, 플래그만 보면
+    # 그 길이 막힌다. 반대로 이미 서 있는데 또 승인하면 권한이 두 번 생긴다.
+    if formed(root, order_id=order_id):
+        raise HireError(
+            f"이미 편성돼 있다 ({d.approved_by or '?'} · {d.approved_at or '?'}) — "
+            f"다시 세우려면 먼저 회수하라:  dawn-biz crew {order_id} --disband")
     if not by:
         raise HireError("승인자가 필요하다 — 누가 승인했는지 없이 권한을 만들지 않는다")
 

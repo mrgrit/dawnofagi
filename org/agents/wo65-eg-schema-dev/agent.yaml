@@ -17,6 +17,9 @@ tools:
 - fs.read
 - fs.write
 status: active
+phase: P2
+depends_on:
+- coss-plan-lead
 notes: '작업 지시 #65 편성. 작업 종료 시 회수된다 (P7 DoD-4).'
 telemetry:
   emit: true

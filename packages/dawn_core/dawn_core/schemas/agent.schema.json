@@ -2,28 +2,109 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Agent manifest — org/agents/*/agent.yaml",
   "type": "object",
-  "required": ["id", "team", "name", "role", "persona", "works", "autonomy", "tools", "status"],
+  "required": [
+    "id",
+    "team",
+    "name",
+    "role",
+    "persona",
+    "works",
+    "autonomy",
+    "tools",
+    "status"
+  ],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "team": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
-    "name": { "type": "string", "minLength": 1 },
-    "role": { "enum": ["orchestrator", "worker", "verifier", "daemon"] },
-    "persona": { "type": "string" },
-    "works": { "type": "array", "minItems": 1, "items": { "type": "string" } },
-    "autonomy": { "enum": ["A0", "A1", "A2", "A3"] },
-    "model_hint": { "type": "string" },
-    "tools": { "type": "array", "minItems": 1, "items": { "type": "string" } },
-    "status": { "enum": ["active", "dormant", "retired"] },
-    "zone": { "enum": ["ext", "pipe", "dmz", "int", "user"] },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "team": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "role": {
+      "enum": [
+        "orchestrator",
+        "worker",
+        "verifier",
+        "daemon"
+      ]
+    },
+    "persona": {
+      "type": "string"
+    },
+    "works": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "autonomy": {
+      "enum": [
+        "A0",
+        "A1",
+        "A2",
+        "A3"
+      ]
+    },
+    "model_hint": {
+      "type": "string"
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "enum": [
+        "active",
+        "dormant",
+        "retired"
+      ]
+    },
+    "zone": {
+      "enum": [
+        "ext",
+        "pipe",
+        "dmz",
+        "int",
+        "user"
+      ]
+    },
     "telemetry": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "emit": { "type": "boolean" },
-        "service_name": { "type": "string" }
+        "emit": {
+          "type": "boolean"
+        },
+        "service_name": {
+          "type": "string"
+        }
       }
     },
-    "notes": { "type": "string" }
+    "notes": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string",
+      "pattern": "^P[0-9]+$",
+      "description": "오케스트레이터 위상. 같은 위상은 동시에 돈다."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "먼저 끝나야 하는 편성 역할(role_key). 착수 순서가 여기서 나온다."
+    }
   }
 }
