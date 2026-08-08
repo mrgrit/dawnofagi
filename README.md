@@ -1,4 +1,4 @@
-# the dawn of AGI (다노파기)
+# Dawn of AGI
 
 > **AI 역사가 AGI로 가는 길에 필요한 것들을 만들어 공급하고 확산한다.**
 
